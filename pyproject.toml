@@ -17,6 +17,7 @@ tqdm = "^4.66.2"
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0.0"
 black = "^24.2.0"
+matplotlib = "^3.8.3"
 
 [build-system]
 requires = ["poetry-core"]
