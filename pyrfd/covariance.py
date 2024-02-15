@@ -23,6 +23,9 @@ class SquaredExponential(CovarianceModel):
 
     def learning_rate(self, loss, grad_norm):
         """RFD learning rate from Random Function Descent paper"""
+        # numerically stable version
+        # (cf. https://en.wikipedia.org/wiki/Numerical_stability#Example)
+        # to avoid catastrophic cancellation in the difference
         tmp = (self.mean - loss) / 2
         return (self.scale**2) / (
             torch.sqrt(tmp**2 + (self.scale * grad_norm) ** 2) + tmp
