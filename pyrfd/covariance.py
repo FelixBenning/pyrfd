@@ -6,6 +6,61 @@ from sklearn.linear_model import LinearRegression
 import numpy as np
 import torch
 
+def fit_mean_var(self, batch_sizes, batch_losses, max_bootstrap=100):
+    b_inv = [1 / b for b in batch_sizes]
+
+    # we initialize with the assumption that the variance at batch_size=Inf is zero
+    var_reg = LinearRegression(fit_intercept=True)
+    var_reg.fit([0, 1], [0, 1])  # initialize with beta0=1 and beta1=1
+
+    # bootstrapping Weighted Least Squares (WLS)
+    for idx in range(max_bootstrap):
+        vars = [var_reg.predict(x) for x in b_inv]  # variance at batchsizes 1/b in X
+
+        mu = np.average(batch_losses, [1 / v for v in vars])
+        centered_squares = [(Lb - mu) ** 2 for Lb in batch_losses]
+
+        old_intercept = var_reg.intercept_
+        # fourth moments i.e. 3*sigma^4 = 3 * var^2 are the variance of the centered
+        # squares, the weights should be 1/these variances
+        # (we leave out the 3 as it does not change the relative weights)
+        var_reg.fit(b_inv, centered_squares, sample_weight=[1 / v**2 for v in vars])
+
+        if math.isclose(old_intercept, var_reg.intercept_):
+            print(f"Bootstrapping WLS converged in {idx} iterations")
+            self.mean = mu
+            self.var_reg = var_reg
+            return {"mean": mu, "var_regression": var_reg}
+
+    warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
+    self.mean = mu
+    self.var_reg = var_reg
+    return {"mean": mu, "var_regression": var_reg}
+
+def isotropic_derivative_var_estimation(self, batch_sizes, sq_grad_norms, max_bootstrap=100) -> LinearRegression:
+    b_inv = [1 / b for b in batch_sizes]
+
+    g_var_reg = LinearRegression(fit_intercept=True)
+    g_var_reg.fit([0, 1], [0, 1])  # initialize with beta0=1 and beta1=1
+
+    # bootstrapping WLS
+    for idx in range(max_bootstrap):
+        vars = [g_var_reg.predict(x) for x in b_inv] # variances at batchsize 1/b
+
+        # squared grad norms are already (iid) sums of squared Gaussians
+        # variance of squares is 3Var^2 but the 3 does not matter as it cancels
+        # out in the weighting we also have a sum of squares (norm), but this
+        # also only results in a constant which does not matter
+        old_bias = g_var_reg.intercept_
+        g_var_reg.fit(b_inv, sq_grad_norms, [1/v**2 for v in vars])
+
+        if math.isclose(old_bias, g_var_reg.intercept_):
+            print(f"Bootstrapping WLS converged in {idx} iterations")
+            self.g_var_reg = g_var_reg
+            return g_var_reg
+
+    warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
+    return g_var_reg
 
 class CovarianceModel:
     __slots__ = "mean", "var_reg", "g_var_reg"
@@ -14,23 +69,26 @@ class CovarianceModel:
     def learning_rate(self, loss, grad_norm):
         return NotImplemented
     
-    def non_parametric_covariance_estimator(self, df:DataFrame, dims):
+    def isotropic_cov_at_zero(self, df:DataFrame, dims):
         if ("sq_grad_norm" not in df) and ("grad_norm" in df):
             df["sq_grad_norm"] = df["grad_norm"] ** 2
 
-        # μ, var_reg = mean_var_estimation(df[:, :batchsize], df[:, :loss])
-        # sqg_norm_reg = isotropic_derivative_var_estimation(df[:, :batchsize], df[:, :sq_grad_norm])
+        tmp =  fit_mean_var(df["batchsize"], df["loss"])
+        self.mean = tmp["mean"]
+        self.var_reg:LinearRegression = tmp["var_regression"]
+
+        self.g_var_reg:LinearRegression = isotropic_derivative_var_estimation(df["batchsize"], df["sq_grad_norm"])
 
         # # non-parametric estimates of C(0) and -C'(0) for the Loss and sample error ϵ
-        # C0_L = LinearRegression.bias(var_reg) * dims
-        # C0_ϵ = LinearRegression.slope(var_reg)[1] * dims
-        # Cprime0_L = LinearRegression.bias(sqg_norm_reg)
-        # Cprime0_ϵ = LinearRegression.slope(sqg_norm_reg)[1]
+        C0_L = self.var_reg.intercept_ * dims
+        C0_eps = self.var_reg.coef_[0] * dims
+        Cprime0_L = self.g_var_reg.intercept_
+        Cprime0_eps = self.g_var_reg.coef_[0]
 
 
-        # ## ============================
-        # ### === sanity check plots ===
-        # ## ============================
+        ## ============================
+        ### === sanity check plots ===
+        ## ============================
         # b_size_grouped = DF.combine(
         #     DF.groupby(df, :batchsize, sort=true),
         #     :loss => Stat.mean,
@@ -142,61 +200,6 @@ class CovarianceModel:
         #     sanity_check_plots= (plt_losses, plt_squares, plt_grad_norms)
         # )
 
-    def fit_mean_var(self, batch_sizes, batch_losses, max_bootstrap=100):
-        b_inv = [1 / b for b in batch_sizes]
-
-        # we initialize with the assumption that the variance at batch_size=Inf is zero
-        var_reg = LinearRegression(fit_intercept=True)
-        var_reg.fit([0, 1], [0, 1])  # initialize with beta0=1 and beta1=1
-
-        # bootstrapping Weighted Least Squares (WLS)
-        for idx in range(max_bootstrap):
-            vars = [var_reg.predict(x) for x in b_inv]  # variance at batchsizes 1/b in X
-
-            mu = np.average(batch_losses, [1 / v for v in vars])
-            centered_squares = [(Lb - mu) ** 2 for Lb in batch_losses]
-
-            old_intercept = var_reg.intercept_
-            # fourth moments i.e. 3*sigma^4 = 3 * var^2 are the variance of the centered
-            # squares, the weights should be 1/these variances
-            # (we leave out the 3 as it does not change the relative weights)
-            var_reg.fit(b_inv, centered_squares, sample_weight=[1 / v**2 for v in vars])
-
-            if math.isclose(old_intercept, var_reg.intercept_):
-                print(f"Bootstrapping WLS converged in {idx} iterations")
-                self.mean = mu
-                self.var_reg = var_reg
-                return {"mean": mu, "var_regression": var_reg}
-
-        warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
-        self.mean = mu
-        self.var_reg = var_reg
-        return {"mean": mu, "var_regression": var_reg}
-    
-    def isotropic_derivative_var_estimation(self, batch_sizes, sq_grad_norms, max_bootstrap=100):
-        b_inv = [1 / b for b in batch_sizes]
-
-        g_var_reg = LinearRegression(fit_intercept=True)
-        g_var_reg.fit([0, 1], [0, 1])  # initialize with beta0=1 and beta1=1
-
-        # bootstrapping WLS
-        for idx in range(max_bootstrap):
-            vars = [g_var_reg.predict(x) for x in b_inv] # variances at batchsize 1/b
-
-            # squared grad norms are already (iid) sums of squared Gaussians
-            # variance of squares is 3Var^2 but the 3 does not matter as it cancels
-            # out in the weighting we also have a sum of squares (norm), but this
-            # also only results in a constant which does not matter
-            old_bias = g_var_reg.intercept_
-            g_var_reg.fit(b_inv, sq_grad_norms, [1/v**2 for v in vars])
-
-            if math.isclose(old_bias, g_var_reg.intercept_):
-                print(f"Bootstrapping WLS converged in {idx} iterations")
-                self.g_var_reg = g_var_reg
-                return g_var_reg
-
-        warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
-        return g_var_reg
 
 
 
