@@ -4,11 +4,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from torchvision import datasets, transforms
+from torchvision import transforms
 from torchsummary import summary
-from pathlib import Path
 from tqdm import tqdm
-from PIL import Image
 from .ema import EMA
 from .datasets import MnistDataset, DIR
 from .transforms import RandomRotation
@@ -17,7 +15,22 @@ from .models.modelM5 import ModelM5
 from .models.modelM7 import ModelM7
 
 
-def run(opt=optim.Adam, p_seed=0, p_epochs=10, p_kernel_size=5, p_logdir="temp"):
+def lr_scheduled_optimizer(OptimizerClass):
+    class ScheduledOptimizer(OptimizerClass):
+
+        __slots__ = "lr_scheduler"
+
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self, gamma=0.98)
+        
+        def epoch_step(self):
+            self.lr_scheduler.step()
+
+    return ScheduledOptimizer
+
+
+def run(OptClass=lr_scheduled_optimizer(optim.Adam), p_seed=0, p_epochs=10, p_kernel_size=5, p_logdir="temp"):
     # random number generator seed ------------------------------------------------#
     SEED = p_seed
     torch.backends.cudnn.deterministic = True
@@ -41,7 +54,7 @@ def run(opt=optim.Adam, p_seed=0, p_epochs=10, p_kernel_size=5, p_logdir="temp")
     # enable GPU usage ------------------------------------------------------------#
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-    if use_cuda == False:
+    if use_cuda is False:
         print("WARNING: CPU will be used for training.")
         # exit(0)
 
@@ -75,8 +88,7 @@ def run(opt=optim.Adam, p_seed=0, p_epochs=10, p_kernel_size=5, p_logdir="temp")
 
     # hyperparameter selection ----------------------------------------------------#
     ema = EMA(model, decay=0.999)
-    optimizer = opt(model.parameters())
-    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.98)
+    optimizer = OptClass(model.parameters())
 
     # delete result file ----------------------------------------------------------#
     f = open(OUTPUT_FILE, "w")
@@ -177,4 +189,4 @@ def run(opt=optim.Adam, p_seed=0, p_epochs=10, p_kernel_size=5, p_logdir="temp")
         # --------------------------------------------------------------------------#
         # update learning rate scheduler                                           #
         # --------------------------------------------------------------------------#
-        lr_scheduler.step()
+        optimizer.epoch_step()

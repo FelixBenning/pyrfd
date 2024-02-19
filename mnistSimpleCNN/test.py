@@ -16,7 +16,7 @@ def run(p_seed=0, p_kernel_size=5, p_logdir="temp"):
     # enable GPU usage ------------------------------------------------------------#
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-    if use_cuda == False:
+    if use_cuda is False:
         print("WARNING: CPU will be used for training.")
         # exit(0)
 
