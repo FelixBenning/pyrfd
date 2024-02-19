@@ -15,14 +15,14 @@ from .models.modelM5 import ModelM5
 from .models.modelM7 import ModelM7
 
 
-def lr_scheduled_optimizer(OptimizerClass):
+def lr_scheduled_optimizer(OptimizerClass, gamma=0.98):
     class ScheduledOptimizer(OptimizerClass):
 
         __slots__ = "lr_scheduler"
 
         def __init__(self, *args, **kwargs) -> None:
             super().__init__(*args, **kwargs)
-            self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self, gamma=0.98)
+            self.lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(self, gamma=gamma)
         
         def epoch_step(self):
             self.lr_scheduler.step()
@@ -189,4 +189,7 @@ def run(OptClass=lr_scheduled_optimizer(optim.Adam), p_seed=0, p_epochs=10, p_ke
         # --------------------------------------------------------------------------#
         # update learning rate scheduler                                           #
         # --------------------------------------------------------------------------#
-        optimizer.epoch_step()
+        try:
+            optimizer.epoch_step()
+        except AttributeError:
+            pass # no scheduler
