@@ -15,8 +15,8 @@ class CovarianceModel:
         return NotImplemented
     
     def non_parametric_covariance_estimator(self, df:DataFrame, dims):
-        pass
-        # df[:, :sq_grad_norm] = df[:, :grad_norm] .^ 2
+        if ("sq_grad_norm" not in df) and ("grad_norm" in df):
+            df["sq_grad_norm"] = df["grad_norm"] ** 2
 
         # μ, var_reg = mean_var_estimation(df[:, :batchsize], df[:, :loss])
         # sqg_norm_reg = isotropic_derivative_var_estimation(df[:, :batchsize], df[:, :sq_grad_norm])
