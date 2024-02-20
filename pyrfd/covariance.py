@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from cProfile import label
 from logging import warning
 import math
 import pandas as pd
@@ -6,6 +7,7 @@ from sklearn.linear_model import LinearRegression
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+import scipy.stats as stats
 
 
 def fit_mean_var(batch_sizes, batch_losses, max_bootstrap=100):
@@ -81,7 +83,7 @@ class CovarianceModel:
     def learning_rate(self, loss, grad_norm):
         return NotImplemented
 
-    def isotropic_cov_at_zero(self, df: pd.DataFrame, dims):
+    def isotropic_fit(self, df: pd.DataFrame, dims):
         if ("sq_grad_norm" not in df) and ("grad_norm" in df):
             df["sq_grad_norm"] = df["grad_norm"] ** 2
 
@@ -106,141 +108,140 @@ class CovarianceModel:
             df.groupby("batchsize", sort=True)
             .agg(
                 loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
-                loss_varm=pd.NamedAgg(
+                loss_var=pd.NamedAgg(
                     column="loss", aggfunc=lambda x: np.mean(x - self.mean) ** 2
                 ),
                 sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
             )
             .reset_index()
         )
-        b_size_inv: np.array = 1 / b_size_grouped["batchsize"]
-        var_estimates = self.var_reg.predict(b_size_inv.to_numpy().reshape(-1, 1))
+        b_size_g_inv: np.array = 1 / b_size_grouped["batchsize"]
+        var_estimates = self.var_reg.predict(b_size_g_inv.to_numpy().reshape(-1, 1))
 
-        ## ==== Plot Losses =====
         # only select <100 examples per batch size
         reduced_df = df.groupby("batchsize").head(100).reset_index(drop=True)
-        # reduced_df = DF.combine(
-        #     DF.groupby(df, :batchsize),
-        #     DF.All() .=> (x->first(x,100)) .=> DF.All()
-        # )
+        b_size_inv = 1 / reduced_df["batchsize"]
 
-        fig, ax = plt.subplots()
-        ax.set_xscale("log")
-        ax.set_xlabel("1/b")
-        ax.scatter(
-            1 / reduced_df["batchsize"],
+        fig, axs = plt.subplots(3)
+
+        ## ==== Plot Losses =====
+        axs[0].set_xscale("log")
+        axs[0].set_xlabel("1/b")
+
+        # scatterplot
+        axs[0].scatter(
+            b_size_inv,
             reduced_df["loss"],
             s=1,  # marker size
             label=r"$\mathcal{L}_b(w)$",
         )
-        ax.legend()
-        ax.plot(
-            b_size_inv, b_size_grouped["loss_mean"], marker="*", label="batchwise mean"
+        # batchwise means
+        axs[0].plot(
+            b_size_g_inv,
+            b_size_grouped["loss_mean"],
+            marker="*",
+            label="batchwise mean",
         )
-        fig.show()
-        # plt_losses = plot(
-        #     1 ./ reduced_df[:, :batchsize], reduced_df[:, :loss],
-        #     seriestype=:scatter,
-        #     xlabel="1/b",
-        #     label=L"\mathcal{L}_b(w)",
-        #     markersize=1,
-        #     legend=:topleft,
-        #     xaxis=:log,
-        #     # xticks=([0.01, 0.1, 0.25, 1/2, 1], ["1/100", "1/10", "1/4", "1/2", 1]),
-        # )
-        # plot!(
-        #     plt_losses,
-        #     b_size_inv, b_size_grouped[:, :loss_mean],
-        #     markershape=:cross,
-        #     label="batchwise mean"
-        # )
-        # plot!(
-        #     plt_losses,
-        #     b_size_inv, μ .* ones(length(b_size_inv)),
-        #     ribbon= (
-        #         -Dist.quantile.(Dist.Normal.(0, sqrt.(var_estimates)), 0.025),
-        #         Dist.quantile.(Dist.Normal.(0, sqrt.(var_estimates)), 0.975)
-        #     ),
-        #     fillalpha=0.3,
-        #     label=L"\hat{μ}=%$(round(μ, sigdigits=4))"
-        # )
+        axs[0].plot(
+            b_size_g_inv,
+            np.full_like(b_size_g_inv, fill_value=self.mean),
+            label=rf"$\hat\mu={self.mean:.4}$",
+        )
+        axs[0].fill_between(
+            x=b_size_g_inv,
+            y1=self.mean + stats.norm.ppf(0.025) * np.sqrt(var_estimates),
+            y2=self.mean + stats.norm.ppf(0.975) * np.sqrt(var_estimates),
+            alpha=0.3,
+        )
+        # legend
+        axs[0].legend(loc="upper left")
 
-        # ## === Plot squared errors =====
-        # plt_squares = plot(
-        #     1 ./ reduced_df[:, :batchsize], map(Lb->(Lb - μ)^2, reduced_df[:, :loss]),
-        #     seriestype=:scatter,
-        #     # xaxis=:log,
-        #     xlabel="1/b",
-        #     label=L"(\mathcal{L}_b(w)-\hat{\mu})^2",
-        #     markersize=1,
-        #     # xticks=([0.1, 0.25, 1/2, 1], ["1/10", "1/4", "1/2", 1]),
-        #     # fontfamily="Computer Modern",
-        # );
-        # plot!(
-        #     plt_squares,
-        #     b_size_inv,
-        #     b_size_grouped[:,:loss_var],
-        #     markershape=:cross,
-        #     label="batchwise mean squares"
-        # )
+        ## === Plot squared errors =====
+        axs[1].set_xlabel("1/b")
+        # axs[1,0].set_xscale("log")
+        axs[1].scatter(
+            b_size_inv,
+            (reduced_df["loss"] - self.mean) ** 2,
+            s=1,  # marker size
+            label=r"$(\mathcal{L}_b(w)-\hat{\mu})^2$",
+        )
+        axs[1].plot(
+            b_size_g_inv,
+            b_size_grouped["loss_var"],
+            marker="*",
+            label="batchwise mean squares",
+        )
+        axs[1].plot(
+            b_size_g_inv,
+            var_estimates,
+            label=r"Var$(\mathcal{L}_b(w))$",
+        )
+        axs[1].fill_between(
+            x=b_size_g_inv,
+            # χ^2 confidence bounds
+            y1=var_estimates + stats.chi2.ppf(0.025, df=1) * var_estimates,
+            y2=var_estimates + stats.chi2.ppf(0.975, df=1) * var_estimates,
+            alpha=0.3,
+        )
 
-        # # χ^2 confidence bounds
-        # lower_chisq(var) = (1-Dist.quantile(Dist.Chisq(1), 0.025)) * var
-        # upper_chisq(var) = (Dist.quantile(Dist.Chisq(1), 0.975)-1) * var
+        # ==== Plot Gradient Norms ====
+        axs[2].set_xlabel("1/b")
+        axs[2].scatter(
+            b_size_inv,
+            reduced_df["sq_grad_norm"],
+            s=1,  # marker size
+            label=r"$\|\nabla\mathcal{L}_b(w)\|^2$",
+        )
+        axs[2].plot(
+            b_size_g_inv,
+            b_size_grouped["sq_grad_norm_mean"],
+            marker="*",
+            label="batchwise mean",
+        )
+        sq_norm_means = self.g_var_reg.predict(b_size_g_inv.to_numpy().reshape(-1, 1))
+        axs[2].plot(
+            b_size_g_inv,
+            sq_norm_means,
+            label=r"$\mathbb{E}[\|\nabla\mathcal{L}_b(w)\|^2]$",
+        )
+        axs[2].fill_between(
+            x=b_size_g_inv,
+            y1=sq_norm_means
+            + (stats.chi2.ppf(0.025, dims) - dims) * sq_norm_means / dims,
+            y2=sq_norm_means
+            + (stats.chi2.ppf(0.975, dims) - dims) * sq_norm_means / dims,
+            alpha=0.3,
+        )
 
-        # plot!(
-        #     plt_squares,
-        #     b_size_inv, var_estimates,
-        #     ribbon= (lower_chisq.(var_estimates), upper_chisq.(var_estimates)),
-        #     fillalpha=0.3,
-        #     label=L"Var($\mathcal{L}_b(w)$)",
-        # )
+        # TODO: figure out wtf is wrong with the confidence interval of the squared norm
 
-        # # ==== Plot Gradient Norms ====
-        # plt_grad_norms = plot(
-        #     1 ./ reduced_df[:,:batchsize], reduced_df[:, :sq_grad_norm],
-        #     seriestype=:scatter,
-        #     markersize=1,
-        #     xlabel="1/b",
-        #     label=L"\|\nabla\mathcal{L}_b(w)\|^2",
-        #     legend=:topleft,
-        # )
-        # plot!(
-        #     plt_grad_norms,
-        #     b_size_inv,
-        #     b_size_grouped[:,:sq_grad_norm_mean],
-        #     markershape=:cross,
-        #     label="batchwise mean",
-        # )
+        axs[2].legend(loc="upper left")
 
-        # sq_norm_means = [sqg_norm_reg([x]) for x in b_size_inv]
-        # lower_sq_norms(sqn_mean) = (dims - Dist.quantile(Dist.Chisq(dims),0.025)) * sqn_mean / dims
-        # upper_sq_norms(sqn_mean) = (Dist.quantile(Dist.Chisq(dims), 0.975) - dims) * sqn_mean / dims
-
-        # plot!(
-        #     plt_grad_norms,
-        #     b_size_inv, sq_norm_means,
-        #     ribbon= (lower_sq_norms.(sq_norm_means), upper_sq_norms.(sq_norm_means)),
-        #     fillalpha=0.3,
-        #     label=L"$\mathbb{E}[\|\nabla\mathcal{L}_b(w)\|^2]$)",
-        # )
-        # # TODO: figure out wtf is wrong with the confidence interval of the squared norm
-
-        # return (
-        #     mean = μ,
-        #     var = (theo_loss=C0_L, sample_error=C0_ϵ),
-        #     var_derivative = (theo_loss=Cprime0_L, sample_error=Cprime0_ϵ),
-        #     sanity_check_plots= (plt_losses, plt_squares, plt_grad_norms)
-        # )
+        return {
+            "mean": self.mean,
+            "var": {"theo_loss": C0_L, "sample_error": C0_eps},
+            "var_derivative": {"theo_loss": Cprime0_L, "sample_error": Cprime0_eps},
+            "sanity_check_plots": (fig, axs),
+        }
 
 
 class SquaredExponential(CovarianceModel):
-    __slots__ = "scale"
+    __slots__ = "scale", "variance"
 
     def __init__(self, scale, mean=0, variance=1):
         self.mean = mean
         self.variance = variance
         self.scale = scale
+
+    def fit(self, df: pd.DataFrame, dims):
+        res = super().isotropic_fit(df, dims)
+        self.mean = res["mean"]
+        self.variance = res["var"]["theo_loss"]
+        # σ²_ϵ = result.var.sample_error
+        self.scale = np.sqrt(self.variance / res["var_derivative"]["theo_loss"])
+        # s_ϵ = sqrt(σ²_ϵ / result.var_derivative.sample_error)
+
+        return res["sanity_check_plots"]
 
     def learning_rate(self, loss, grad_norm):
         """RFD learning rate from Random Function Descent paper"""
@@ -257,4 +258,4 @@ if __name__ == "__main__":
     df = pd.read_csv("mnistSimpleCNN/data/loss_samples.csv")
     cov = CovarianceModel()
     dims = 2_300_000
-    cov.isotropic_cov_at_zero(df, dims)
+    cov.isotropic_fit(df, dims)
