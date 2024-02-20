@@ -109,7 +109,7 @@ class CovarianceModel:
             .agg(
                 loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
                 loss_var=pd.NamedAgg(
-                    column="loss", aggfunc=lambda x: np.mean(x - self.mean) ** 2
+                    column="loss", aggfunc=lambda x: np.mean((x - self.mean) ** 2)
                 ),
                 sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
             )
@@ -179,10 +179,11 @@ class CovarianceModel:
         axs[1].fill_between(
             x=b_size_g_inv,
             # χ^2 confidence bounds
-            y1=var_estimates + stats.chi2.ppf(0.025, df=1) * var_estimates,
-            y2=var_estimates + stats.chi2.ppf(0.975, df=1) * var_estimates,
+            y1=var_estimates + (stats.chi2.ppf(0.025, df=1) - 1) * var_estimates,
+            y2=var_estimates + (stats.chi2.ppf(0.975, df=1) - 1) * var_estimates,
             alpha=0.3,
         )
+        axs[1].legend(loc="upper left")
 
         # ==== Plot Gradient Norms ====
         axs[2].set_xlabel("1/b")
@@ -256,6 +257,9 @@ class SquaredExponential(CovarianceModel):
 
 if __name__ == "__main__":
     df = pd.read_csv("mnistSimpleCNN/data/loss_samples.csv")
-    cov = CovarianceModel()
+    df = df[df["trainmode"] == False]
+    cov = SquaredExponential(1)
     dims = 2_300_000
-    cov.isotropic_fit(df, dims)
+    fig, axs = cov.fit(df, dims)
+    fig.show()
+
