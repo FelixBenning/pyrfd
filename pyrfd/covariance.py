@@ -1,12 +1,14 @@
 from abc import abstractmethod
 from logging import warning
 import math
+import time
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from scipy import stats
+
 
 def selection(sorted_list, num_elts):
     """
@@ -15,15 +17,14 @@ def selection(sorted_list, num_elts):
     """
     if len(sorted_list) < num_elts:
         return sorted_list
-    idxs = np.round(np.linspace(0, len(sorted_list)-1, num_elts)).astype(int)
+    idxs = np.round(np.linspace(0, len(sorted_list) - 1, num_elts)).astype(int)
     return sorted_list[idxs]
 
 
-
-def fit_mean_var(batch_sizes:np.array, batch_losses:np.array, max_bootstrap=100):
+def fit_mean_var(batch_sizes: np.array, batch_losses: np.array, max_bootstrap=100):
     batch_sizes = np.array(batch_sizes)
     batch_losses = np.array(batch_losses)
-    b_inv = 1/batch_sizes
+    b_inv = 1 / batch_sizes
 
     # we initialize with the assumption that the variance at batch_size=Inf is zero
     var_reg = LinearRegression(fit_intercept=True)
@@ -35,7 +36,7 @@ def fit_mean_var(batch_sizes:np.array, batch_losses:np.array, max_bootstrap=100)
     for idx in range(max_bootstrap):
         vars = var_reg.predict(b_inv.reshape(-1, 1))  # variance at batchsizes 1/b in X
 
-        mu = np.average(batch_losses, weights=(1/vars))
+        mu = np.average(batch_losses, weights=(1 / vars))
         centered_squares = (batch_losses - mu) ** 2
 
         old_intercept = var_reg.intercept_
@@ -45,7 +46,7 @@ def fit_mean_var(batch_sizes:np.array, batch_losses:np.array, max_bootstrap=100)
         var_reg.fit(
             b_inv.reshape(-1, 1),
             centered_squares,
-            sample_weight=1/vars ** 2,
+            sample_weight=1 / vars**2,
         )
 
         if math.isclose(old_intercept, var_reg.intercept_):
@@ -117,17 +118,13 @@ class CovarianceModel:
         ### === sanity check plots ===
         ## ============================
         grouped = df.groupby("batchsize", sort=True)
-        b_size_grouped = (
-            grouped
-            .agg(
-                loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
-                loss_var=pd.NamedAgg(
-                    column="loss", aggfunc=lambda x: np.mean((x - self.mean) ** 2)
-                ),
-                sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
-            )
-            .reset_index()
-        )
+        b_size_grouped = grouped.agg(
+            loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
+            loss_var=pd.NamedAgg(
+                column="loss", aggfunc=lambda x: np.mean((x - self.mean) ** 2)
+            ),
+            sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
+        ).reset_index()
         b_size_g_inv: np.array = 1 / b_size_grouped["batchsize"]
         var_estimates = self.var_reg.predict(b_size_g_inv.to_numpy().reshape(-1, 1))
 
@@ -135,120 +132,123 @@ class CovarianceModel:
         reduced_df = df.groupby("batchsize").head(100).reset_index(drop=True)
         b_size_inv = 1 / reduced_df["batchsize"]
 
-        fig, axs = plt.subplots(3,2)
+        fig, axs = plt.subplots(3, 2)
 
         ## ==== Plot Losses =====
-        axs[0,0].set_xscale("log")
+        axs[0, 0].set_xscale("log")
         # axs[0,0].set_xlabel("1/b")
 
         # scatterplot
-        axs[0,0].scatter(
+        axs[0, 0].scatter(
             b_size_inv,
             reduced_df["loss"],
             s=1,  # marker size
             label=r"$\mathcal{L}_b(w)$",
         )
         # batchwise means
-        axs[0,0].plot(
+        axs[0, 0].plot(
             b_size_g_inv,
             b_size_grouped["loss_mean"],
             marker="*",
             label="batchwise mean",
         )
-        axs[0,0].plot(
+        axs[0, 0].plot(
             b_size_g_inv,
             np.full_like(b_size_g_inv, fill_value=self.mean),
             label=rf"$\hat\mu={self.mean:.4}$",
         )
-        axs[0,0].fill_between(
+        axs[0, 0].fill_between(
             x=b_size_g_inv,
             y1=self.mean + stats.norm.ppf(0.025) * np.sqrt(var_estimates),
             y2=self.mean + stats.norm.ppf(0.975) * np.sqrt(var_estimates),
             alpha=0.3,
         )
         # legend
-        axs[0,0].legend(loc="upper left")
+        axs[0, 0].legend(loc="upper left")
 
         ## QQplot
         b_size_selection = np.array(selection(b_size_grouped["batchsize"], 5))[1:]
         for bs in b_size_selection:
-            stats.probplot(grouped.get_group(bs)["loss"], dist="norm",plot=axs[0,1])
-        for idx, line in enumerate(axs[0,1].get_lines()):
+            stats.probplot(grouped.get_group(bs)["loss"], dist="norm", plot=axs[0, 1])
+        for idx, line in enumerate(axs[0, 1].get_lines()):
             line.set_color(f"C{idx//2}")
-            if idx % 2 == 0: # scatter
+            if idx % 2 == 0:  # scatter
                 line.set_markersize(1)
                 line.set_label(f"b={b_size_selection[idx//2]}")
             if idx % 2 == 1:
                 line.set_linestyle("--")
 
-        axs[0,1].set_xlabel("")
-        axs[0,1].legend()
-
+        axs[0, 1].set_xlabel("")
+        axs[0, 1].legend()
 
         ## === Plot squared errors =====
         # axs[1,0].set_xlabel("1/b")
         # axs[1,0].set_xscale("log")
-        axs[1,0].scatter(
+        axs[1, 0].scatter(
             b_size_inv,
             (reduced_df["loss"] - self.mean) ** 2,
             s=1,  # marker size
             label=r"$(\mathcal{L}_b(w)-\hat{\mu})^2$",
         )
-        axs[1,0].plot(
+        axs[1, 0].plot(
             b_size_g_inv,
             b_size_grouped["loss_var"],
             marker="*",
             label="batchwise mean squares",
         )
-        axs[1,0].plot(
+        axs[1, 0].plot(
             b_size_g_inv,
             var_estimates,
             label=r"Var$(\mathcal{L}_b(w))$",
         )
-        axs[1,0].fill_between(
+        axs[1, 0].fill_between(
             x=b_size_g_inv,
             # χ^2 confidence bounds
             y1=var_estimates + (stats.chi2.ppf(0.025, df=1) - 1) * var_estimates,
             y2=var_estimates + (stats.chi2.ppf(0.975, df=1) - 1) * var_estimates,
             alpha=0.3,
         )
-        axs[1,0].legend(loc="upper left")
+        axs[1, 0].legend(loc="upper left")
 
         # QQ-plot against chi^2
         for bs in b_size_selection:
-            stats.probplot((grouped.get_group(bs)["loss"] - self.mean) ** 2, dist=stats.chi2(df=1),plot=axs[1,1])
-        for idx, line in enumerate(axs[1,1].get_lines()):
+            stats.probplot(
+                (grouped.get_group(bs)["loss"] - self.mean) ** 2,
+                dist=stats.chi2(df=1),
+                plot=axs[1, 1],
+            )
+        for idx, line in enumerate(axs[1, 1].get_lines()):
             line.set_color(f"C{idx//2}")
-            if idx % 2 == 0: # scatter
+            if idx % 2 == 0:  # scatter
                 line.set_markersize(1)
                 line.set_label(f"b={b_size_selection[idx//2]}")
             if idx % 2 == 1:
                 line.set_linestyle("--")
-        axs[1,1].set_title("")
-        axs[1,1].set_xlabel("")
-        axs[1,1].legend()
+        axs[1, 1].set_title("")
+        axs[1, 1].set_xlabel("")
+        axs[1, 1].legend()
 
         # ==== Plot Gradient Norms ====
-        axs[2,0].set_xlabel("1/b")
-        axs[2,0].scatter(
+        axs[2, 0].set_xlabel("1/b")
+        axs[2, 0].scatter(
             b_size_inv,
             reduced_df["sq_grad_norm"],
             s=1,  # marker size
             label=r"$\|\nabla\mathcal{L}_b(w)\|^2$",
         )
-        axs[2,0].plot(
+        axs[2, 0].plot(
             b_size_g_inv,
             b_size_grouped["sq_grad_norm_mean"],
             marker="*",
             label="batchwise mean",
         )
         sq_norm_means = self.g_var_reg.predict(b_size_g_inv.to_numpy().reshape(-1, 1))
-        axs[2,0].plot(
+        axs[2, 0].plot(
             b_size_g_inv,
             sq_norm_means,
             label=r"$\mathbb{E}[\|\nabla\mathcal{L}_b(w)\|^2]$",
         )
-        axs[2,0].fill_between(
+        axs[2, 0].fill_between(
             x=b_size_g_inv,
             y1=sq_norm_means
             + (stats.chi2.ppf(0.025, dims) - dims) * sq_norm_means / dims,
@@ -259,19 +259,23 @@ class CovarianceModel:
 
         # TODO: figure out wtf is wrong with the confidence interval of the squared norm
 
-        axs[2,0].legend(loc="upper left")
+        axs[2, 0].legend(loc="upper left")
 
         for bs in b_size_selection:
-            stats.probplot(grouped.get_group(bs)["sq_grad_norm"], dist=stats.chi2(df=dims),plot=axs[2,1])
-        for idx, line in enumerate(axs[2,1].get_lines()):
+            stats.probplot(
+                grouped.get_group(bs)["sq_grad_norm"],
+                dist=stats.chi2(df=dims),
+                plot=axs[2, 1],
+            )
+        for idx, line in enumerate(axs[2, 1].get_lines()):
             line.set_color(f"C{idx//2}")
-            if idx % 2 == 0: # scatter
+            if idx % 2 == 0:  # scatter
                 line.set_markersize(1)
                 line.set_label(f"b={b_size_selection[idx//2]}")
             if idx % 2 == 1:
                 line.set_linestyle("--")
-        axs[2,1].set_title("")
-        axs[2,1].legend()
+        axs[2, 1].set_title("")
+        axs[2, 1].legend()
 
         return {
             "mean": self.mean,
@@ -288,6 +292,65 @@ class SquaredExponential(CovarianceModel):
         self.mean = mean
         self.variance = variance
         self.scale = scale
+
+    def auto_fit(self, model_factory, loss, data, cache=None):
+        dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
+        df = pd.DataFrame()
+        if cache is not None:
+            df = pd.read_csv(cache)
+
+        def loader(b_size):
+            return torch.utils.data.DataLoader(data, batch_size=b_size, shuffle=True)
+
+        def loss_sample(input, target):
+            model = model_factory()
+            # this is a weird way to set the gradients to zero but pytorch...
+            torch.optim.SGD(model.parameters()).zero_grad()
+            with torch.enable_grad():
+                prediction = model(input)
+                sample_loss = loss(prediction, target)
+                sample_loss.backward()
+
+            with torch.no_grad():
+                grads = [
+                    param.grad.detach().flatten()
+                    for param in model.parameters()
+                    if param.grad is not None
+                ]
+                grad_norm = torch.cat(grads).norm()
+            return sample_loss.item(), grad_norm
+
+        b_size_counts = {}
+        new_samples = []
+        try:
+            for b_size, count in b_size_counts.items():
+                data_loader = loader(b_size)
+                idx = 0
+                while True:
+                    for x, y in data_loader:
+                        if idx > count:
+                            break
+                        idx += 1
+                        loss, g_norm = loss_sample(x, y)
+                        new_samples.append(
+                            {
+                                "loss": loss,
+                                "grad_norm": g_norm,
+                                "batchsize": b_size,
+                                "time": time.time(),
+                            }
+                        )
+
+                    if idx > count:
+                        break
+
+        except KeyboardInterrupt:
+            print("catching one interrupt to save data")
+
+        pd.concat([df, pd.DataFrame(new_samples)], ignore_index=True)
+
+        # update cache
+        df.to_csv(cache)
 
     def fit(self, df: pd.DataFrame, dims):
         res = super().isotropic_fit(df, dims)
@@ -317,4 +380,3 @@ if __name__ == "__main__":
     dims = 2_300_000
     fig, axs = cov.fit(df, dims)
     fig.show()
-
