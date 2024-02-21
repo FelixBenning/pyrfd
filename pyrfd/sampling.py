@@ -45,9 +45,7 @@ class IsotropicSampler:
         self.loader = loader
         self.loss_sample = loss_sample
     
-    def sample(self, batchsizes, cachedSamples=None):
-        if cachedSamples is None:
-            cachedSamples = CachedSamples()
+    def sample(self, batchsizes, cachedSamples=CachedSamples()):
         with cachedSamples as records:
             for b_size, count in batchsizes.items():
                 self.sample_batchloss(b_size, count, append_to=records)
