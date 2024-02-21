@@ -1,13 +1,14 @@
 from abc import abstractmethod
 from logging import warning
 import math
-import time
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from scipy import stats
+
+from .sampling import CachedSamples, IsotropicSampler
 
 
 def selection(sorted_list, num_elts):
@@ -87,6 +88,7 @@ def isotropic_derivative_var_estimation(
 
     warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
     return g_var_reg
+
 
 
 class CovarianceModel:
@@ -293,64 +295,20 @@ class SquaredExponential(CovarianceModel):
         self.variance = variance
         self.scale = scale
 
-    def auto_fit(self, model_factory, loss, data, cache=None):
+    def auto_fit(self, model_factory, loss, data, cache=None, tol=1e-3):
         dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
         df = pd.DataFrame()
-        if cache is not None:
-            df = pd.read_csv(cache)
+        sampler = IsotropicSampler(model_factory, loss, data)
 
-        def loader(b_size):
-            return torch.utils.data.DataLoader(data, batch_size=b_size, shuffle=True)
+        cached_samples = CachedSamples(cache)
+        rel_error = 1
+        while rel_error > tol:
+            b_size_counts = {} # TODO: batchsize sampling
 
-        def loss_sample(input, target):
-            model = model_factory()
-            # this is a weird way to set the gradients to zero but pytorch...
-            torch.optim.SGD(model.parameters()).zero_grad()
-            with torch.enable_grad():
-                prediction = model(input)
-                sample_loss = loss(prediction, target)
-                sample_loss.backward()
+            sampler.sample(b_size_counts, cached_samples)
+            df = pd.DataFrame(cached_samples.records)
 
-            with torch.no_grad():
-                grads = [
-                    param.grad.detach().flatten()
-                    for param in model.parameters()
-                    if param.grad is not None
-                ]
-                grad_norm = torch.cat(grads).norm()
-            return sample_loss.item(), grad_norm
-
-        b_size_counts = {}
-        new_samples = []
-        try:
-            for b_size, count in b_size_counts.items():
-                data_loader = loader(b_size)
-                idx = 0
-                while True:
-                    for x, y in data_loader:
-                        if idx > count:
-                            break
-                        idx += 1
-                        loss, g_norm = loss_sample(x, y)
-                        new_samples.append(
-                            {
-                                "loss": loss,
-                                "grad_norm": g_norm,
-                                "batchsize": b_size,
-                                "time": time.time(),
-                            }
-                        )
-
-                    if idx > count:
-                        break
-
-        except KeyboardInterrupt:
-            print("catching one interrupt to save data")
-
-        pd.concat([df, pd.DataFrame(new_samples)], ignore_index=True)
-
-        # update cache
-        df.to_csv(cache)
+            self.fit(df, dims)
 
     def fit(self, df: pd.DataFrame, dims):
         res = super().isotropic_fit(df, dims)
