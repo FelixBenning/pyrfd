@@ -13,18 +13,14 @@ DEFAULT_VAR_REG.intercept_ = 0.05
 DEFAULT_VAR_REG.coef_ = np.array([1])
 
 
-def intercept_variance(dist: stats.rv_discrete, sample_limit, var_reg):
-    sample_count = sample_limit / dist.mean()
+def intercept_variance(dist: stats.rv_discrete, var_reg):
     theta = dist.expect(func=lambda x: 1 / sq_error_var(var_reg, x))
     w_1st_mom = dist.expect(func=lambda x: 1 / (sq_error_var(var_reg, x) * x))
     w_2nd_mom = dist.expect(func=lambda x: 1 / (sq_error_var(var_reg, x) * (x**2)))
-    w_var = dist.expect(
-        func=lambda x: 1 / (sq_error_var(var_reg, x)) * (1 / x - w_1st_mom / theta) ** 2
-    )
-    return w_2nd_mom / (sample_count * theta * w_var)
+    return (dist.mean() * w_2nd_mom) / (theta * w_2nd_mom - w_1st_mom ** 2)
 
 
-def batchsize_counts(sample_limit, var_reg=DEFAULT_VAR_REG):
+def batchsize_counts(var_reg=DEFAULT_VAR_REG):
     beta_0 = var_reg.intercept_
     beta_1 = var_reg.coef_[0]
     if beta_0 <= 0:
@@ -36,7 +32,7 @@ def batchsize_counts(sample_limit, var_reg=DEFAULT_VAR_REG):
     cutoff = 20
     def gibbs_dist(w):
         # should really stop at infinite but cost...
-        ks = np.arange(start=cutoff, stop=max_loc_guess + 500/w[1], step=1)
+        ks = np.arange(start=cutoff, stop=max_loc_guess + 1000, step=1)
 
         logits = w[0] / sq_error_var(var_reg, ks) - w[1] * ks
         max_logit = np.max(logits)
@@ -48,9 +44,10 @@ def batchsize_counts(sample_limit, var_reg=DEFAULT_VAR_REG):
 
     
     res= optimize.minimize(
-        lambda log_w: intercept_variance(gibbs_dist(np.exp(log_w)), sample_limit, var_reg),
+        lambda log_w: intercept_variance(gibbs_dist(np.exp(log_w)), var_reg),
         np.zeros(2),
         method="Nelder-Mead",
+        # callback=lambda x: print(x),
     )
     # w1s = np.exp2(np.linspace(-1, 1, 30))
     # w0s = np.exp2(np.linspace(-3, 1, 30))
@@ -65,11 +62,14 @@ def batchsize_counts(sample_limit, var_reg=DEFAULT_VAR_REG):
 
 if __name__ == "__main__":
     from matplotlib import pyplot as plt
-
-    res, dist = batchsize_counts(10_000)
-    x= range(20,100)
-    plt.plot(x, dist.pmf(x), "ro", ms=12,mec="r")
+    from time import time
+    start = time()
+    res, dist = batchsize_counts()
+    end = time()
+    print(f"timer elapsed: {end-start}")
+    # x= range(20,100)
+    # plt.plot(x, dist.pmf(x), "ro", ms=12,mec="r")
     # X = batchsize_counts(1000)
     # plt.imshow(X, cmap="hot")
     # plt.show()
-    pass
+    # pass
