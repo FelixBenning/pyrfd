@@ -21,7 +21,6 @@ def selection(sorted_list, num_elts):
     idxs = np.round(np.linspace(0, len(sorted_list) - 1, num_elts)).astype(int)
     return sorted_list[idxs]
 
-
 def fit_mean_var(batch_sizes: np.array, batch_losses: np.array, max_bootstrap=100):
     batch_sizes = np.array(batch_sizes)
     batch_losses = np.array(batch_losses)
