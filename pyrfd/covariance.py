@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 import torch
 from scipy import stats
 
+from pyrfd.batchsize import DEFAULT_VAR_REG, batchsize_counts
+
 from .sampling import CachedSamples, IsotropicSampler
 
 
@@ -296,18 +298,21 @@ class SquaredExponential(CovarianceModel):
 
     def auto_fit(self, model_factory, loss, data, cache=None, tol=1e-3):
         dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
-        df = pd.DataFrame()
         sampler = IsotropicSampler(model_factory, loss, data)
 
         cached_samples = CachedSamples(cache)
         rel_error = 1
+        budget = 10_000
+        var_reg = DEFAULT_VAR_REG
         while rel_error > tol:
-            b_size_counts = {} # TODO: batchsize sampling
-
+            b_size_counts = batchsize_counts(
+                budget,
+                var_reg,
+                existing_b_size_samples=cached_samples.as_dataframe()["batchsize"].value_counts(),
+            )
+            # TODO: finish this
             sampler.sample(b_size_counts, cached_samples)
-            df = pd.DataFrame(cached_samples.records)
-
-            self.fit(df, dims)
+            self.fit(cached_samples.as_dataframe(), dims)
 
     def fit(self, df: pd.DataFrame, dims):
         res = super().isotropic_fit(df, dims)

@@ -10,6 +10,9 @@ class CachedSamples:
             self.records = []
         else:
             self.records = pd.read_csv(filename).to_records()
+    
+    def as_dataframe(self):
+        return pd.DataFrame.from_records(self.records)
 
     def __enter__(self):
         return self.records
