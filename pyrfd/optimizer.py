@@ -1,14 +1,14 @@
 import torch
 from torch.optim.optimizer import Optimizer
 
-from .covariance import CovarianceModel
+from .covariance import IsotropicCovariance
 
 
 class RFD(Optimizer):
     """ Random Function Descent (RFD) optimizer
     """
 
-    def __init__(self, params, covariance_model:CovarianceModel, momentum=0):
+    def __init__(self, params, covariance_model:IsotropicCovariance, momentum=0):
         defaults = dict(cov=covariance_model, momentum=momentum)
         super().__init__(params, defaults)
 

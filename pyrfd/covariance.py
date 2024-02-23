@@ -1,4 +1,6 @@
 from abc import abstractmethod
+from collections import namedtuple
+from ctypes import ArgumentError
 from logging import warning
 import math
 import pandas as pd
@@ -22,6 +24,7 @@ def selection(sorted_list, num_elts):
         return sorted_list
     idxs = np.round(np.linspace(0, len(sorted_list) - 1, num_elts)).astype(int)
     return sorted_list[idxs]
+
 
 def fit_mean_var(batch_sizes: np.array, batch_losses: np.array, max_bootstrap=100):
     batch_sizes = np.array(batch_sizes)
@@ -91,15 +94,20 @@ def isotropic_derivative_var_estimation(
     return g_var_reg
 
 
+class IsotropicCovariance:
+    __slots__ = "mean", "var_reg", "g_var_reg", "dims", "fitted"
 
-class CovarianceModel:
-    __slots__ = "mean", "var_reg", "g_var_reg"
+    def __init__(self) -> None:
+        self.fitted = False
+        self.var_reg = DEFAULT_VAR_REG
+        self.g_var_reg = DEFAULT_VAR_REG
 
     @abstractmethod
     def learning_rate(self, loss, grad_norm):
         return NotImplemented
 
-    def isotropic_fit(self, df: pd.DataFrame, dims):
+    def fit(self, df: pd.DataFrame, dims):
+        self.dims = dims
         if ("sq_grad_norm" not in df) and ("grad_norm" in df):
             df["sq_grad_norm"] = df["grad_norm"] ** 2
 
@@ -110,12 +118,6 @@ class CovarianceModel:
         self.g_var_reg: LinearRegression = isotropic_derivative_var_estimation(
             df["batchsize"], df["sq_grad_norm"]
         )
-
-        # # non-parametric estimates of C(0) and -C'(0) for the Loss and sample error ϵ
-        C0_L = self.var_reg.intercept_ * dims
-        C0_eps = self.var_reg.coef_[0] * dims
-        Cprime0_L = self.g_var_reg.intercept_
-        Cprime0_eps = self.g_var_reg.coef_[0]
 
         ## ============================
         ### === sanity check plots ===
@@ -280,21 +282,14 @@ class CovarianceModel:
         axs[2, 1].set_title("")
         axs[2, 1].legend()
 
-        return {
-            "mean": self.mean,
-            "var": {"theo_loss": C0_L, "sample_error": C0_eps},
-            "var_derivative": {"theo_loss": Cprime0_L, "sample_error": Cprime0_eps},
-            "sanity_check_plots": (fig, axs),
-        }
-
-
-class SquaredExponential(CovarianceModel):
-    __slots__ = "scale", "variance"
-
-    def __init__(self, scale, mean=0, variance=1):
-        self.mean = mean
-        self.variance = variance
-        self.scale = scale
+        return (
+            (fig, axs),
+            {
+                "mean": self.mean,
+                "var_reg": self.var_reg,
+                "g_var_reg": self.g_var_reg,
+            },
+        )
 
     def auto_fit(self, model_factory, loss, data, cache=None, tol=1e-3):
         dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
@@ -303,26 +298,30 @@ class SquaredExponential(CovarianceModel):
         cached_samples = CachedSamples(cache)
         rel_error = 1
         budget = 10_000
-        var_reg = DEFAULT_VAR_REG
         while rel_error > tol:
             b_size_counts = batchsize_counts(
                 budget,
-                var_reg,
-                existing_b_size_samples=cached_samples.as_dataframe()["batchsize"].value_counts(),
+                self.var_reg,
+                existing_b_size_samples=cached_samples.as_dataframe()[
+                    "batchsize"
+                ].value_counts(),
             )
-            # TODO: finish this
             sampler.sample(b_size_counts, cached_samples)
             self.fit(cached_samples.as_dataframe(), dims)
 
-    def fit(self, df: pd.DataFrame, dims):
-        res = super().isotropic_fit(df, dims)
-        self.mean = res["mean"]
-        self.variance = res["var"]["theo_loss"]
-        # σ²_ϵ = result.var.sample_error
-        self.scale = np.sqrt(self.variance / res["var_derivative"]["theo_loss"])
-        # s_ϵ = sqrt(σ²_ϵ / result.var_derivative.sample_error)
 
-        return res["sanity_check_plots"]
+class SquaredExponential(IsotropicCovariance):
+    @property
+    def variance(self):
+        if self.fitted:
+            return self.var_reg.intercept_
+        raise ArgumentError("The covariance is not fitted yet")
+
+    @property
+    def scale(self):
+        if self.fitted:
+            return np.sqrt(self.variance * self.dims / self.g_var_reg.intercept_)
+        raise ArgumentError("The covariance is not fitted yet")
 
     def learning_rate(self, loss, grad_norm):
         """RFD learning rate from Random Function Descent paper"""
