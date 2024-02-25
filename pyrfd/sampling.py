@@ -1,7 +1,8 @@
 import pandas as pd
 import torch
-import tqdm
+from tqdm import tqdm
 import time
+from pathlib import Path
 
 class CachedSamples:
     def __init__(self, filename=None):
@@ -9,7 +10,10 @@ class CachedSamples:
         if filename is None:
             self.records = []
         else:
-            self.records = pd.read_csv(filename).to_records()
+            try:
+                self.records = pd.read_csv(filename).to_records().tolist()
+            except FileNotFoundError:
+                self.records = []
     
     def as_dataframe(self):
         return pd.DataFrame.from_records(self.records)
@@ -18,7 +22,8 @@ class CachedSamples:
         return self.records
         
     def __exit__(self, excep_type, excep_val, exc_traceback):
-        if self.filename is not None:
+        if self.filename is not None and len(self.records)>0:
+            Path(self.filename).parent.mkdir(parents=True, exist_ok=True)
             pd.DataFrame(self.records).to_csv(self.filename)
 
 
@@ -43,7 +48,7 @@ class IsotropicSampler:
                     if param.grad is not None
                 ]
                 grad_norm = torch.cat(grads).norm()
-            return sample_loss.item(), grad_norm
+            return sample_loss.item(), grad_norm.item()
         
         self.loader = loader
         self.loss_sample = loss_sample

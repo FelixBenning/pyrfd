@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import torch
 from scipy import stats
 
-from pyrfd.batchsize import DEFAULT_VAR_REG, batchsize_counts
+from pyrfd.batchsize import DEFAULT_VAR_REG, batchsize_counts, empirical_intercept_variance
 
 from .sampling import CachedSamples, IsotropicSampler
 
@@ -297,17 +297,28 @@ class IsotropicCovariance:
 
         cached_samples = CachedSamples(cache)
         rel_error = 1
-        budget = 10_000
+        budget = 0.1 * len(data)
         while rel_error > tol:
+            existing_samples = cached_samples.as_dataframe()
+            try:
+                existing_b_size_counts = existing_samples["batchsize"].value_counts()
+            except KeyError:
+                existing_b_size_counts = pd.Series()
             b_size_counts = batchsize_counts(
                 budget,
                 self.var_reg,
-                existing_b_size_samples=cached_samples.as_dataframe()[
-                    "batchsize"
-                ].value_counts(),
+                existing_b_size_counts,
             )
             sampler.sample(b_size_counts, cached_samples)
-            self.fit(cached_samples.as_dataframe(), dims)
+            samples = cached_samples.as_dataframe()
+            self.fit(samples, dims)
+            var_mean = self.var_reg.intercept_
+            var_var = empirical_intercept_variance(
+                samples["batchsizes"].value_counts(),
+                self.var_reg
+            )
+            rel_error = var_var / var_mean
+
 
 
 class SquaredExponential(IsotropicCovariance):
@@ -335,9 +346,7 @@ class SquaredExponential(IsotropicCovariance):
 
 
 if __name__ == "__main__":
-    df = pd.read_csv("mnistSimpleCNN/data/loss_samples.csv")
-    df = df[df["trainmode"] == False]
-    cov = SquaredExponential(1)
-    dims = 2_300_000
-    fig, axs = cov.fit(df, dims)
-    fig.show()
+    pass
+    # dims = 2_300_000
+    # fig, axs = cov.fit(df, dims)
+    # fig.show()
