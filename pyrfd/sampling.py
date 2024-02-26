@@ -11,7 +11,7 @@ class CachedSamples:
             self.records = []
         else:
             try:
-                self.records = pd.read_csv(filename).to_records().tolist()
+                self.records = pd.read_csv(filename).to_dict("records")
             except FileNotFoundError:
                 self.records = []
     
@@ -24,7 +24,7 @@ class CachedSamples:
     def __exit__(self, excep_type, excep_val, exc_traceback):
         if self.filename is not None and len(self.records)>0:
             Path(self.filename).parent.mkdir(parents=True, exist_ok=True)
-            pd.DataFrame(self.records).to_csv(self.filename)
+            pd.DataFrame(self.records).to_csv(self.filename, index=False)
 
 
 class IsotropicSampler:
@@ -53,15 +53,17 @@ class IsotropicSampler:
         self.loader = loader
         self.loss_sample = loss_sample
     
-    def sample(self, batchsizes, cachedSamples=CachedSamples()):
+    def sample(self, bsize_counts:pd.Series, cachedSamples=CachedSamples()):
         with cachedSamples as records:
-            for b_size, count in batchsizes.items():
-                self.sample_batchloss(b_size, count, append_to=records)
+            total_work = sum([bsize * count for bsize, count in bsize_counts.items()])
+            with tqdm(total=total_work, unit="samples") as pbar:
+                for b_size, count in bsize_counts.items():
+                    self.sample_batchloss(b_size, count, append_to=records, pbar=pbar)
                     
-    def sample_batchloss(self, b_size, count, append_to=[]):
+    def sample_batchloss(self, b_size, count, append_to=[], pbar:tqdm=None):
         data_loader = self.loader(b_size)
         data_iter = iter(data_loader)
-        for _ in tqdm(range(count), desc=f"Sampling batchsize={b_size}"):
+        for _ in range(count):
             try:
                 x,y = next(data_iter)
             except StopIteration:
@@ -77,5 +79,8 @@ class IsotropicSampler:
                     "time": time.time(),
                 }
             )
+            if pbar:
+                pbar.update(b_size)
+                pbar.set_description(f"Sampling loss/gradient (batchsize={b_size})")
         return append_to
 

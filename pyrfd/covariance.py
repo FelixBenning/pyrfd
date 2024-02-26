@@ -1,5 +1,4 @@
 from abc import abstractmethod
-from collections import namedtuple
 from ctypes import ArgumentError
 from logging import warning
 import math
@@ -172,14 +171,16 @@ class IsotropicCovariance:
         axs[0, 0].legend(loc="upper left")
 
         ## QQplot
-        b_size_selection = np.array(selection(b_size_grouped["batchsize"], 5))[1:]
-        for bs in b_size_selection:
-            stats.probplot(grouped.get_group(bs)["loss"], dist="norm", plot=axs[0, 1])
+        # b_size_selection = np.array(selection(b_size_grouped["batchsize"], 5))[1:]
+        # for bs in b_size_selection:
+        bsize_counts = df["batchsize"].value_counts(sort=True, ascending=False)
+        bs = bsize_counts.index[0]
+        stats.probplot(grouped.get_group(bs)["loss"], dist="norm", plot=axs[0, 1])
         for idx, line in enumerate(axs[0, 1].get_lines()):
-            line.set_color(f"C{idx//2}")
+            # line.set_color(f"C{idx//2}")
             if idx % 2 == 0:  # scatter
                 line.set_markersize(1)
-                line.set_label(f"b={b_size_selection[idx//2]}")
+                line.set_label(f"b={bs}")
             if idx % 2 == 1:
                 line.set_linestyle("--")
 
@@ -216,17 +217,17 @@ class IsotropicCovariance:
         axs[1, 0].legend(loc="upper left")
 
         # QQ-plot against chi^2
-        for bs in b_size_selection:
-            stats.probplot(
-                (grouped.get_group(bs)["loss"] - self.mean) ** 2,
-                dist=stats.chi2(df=1),
-                plot=axs[1, 1],
-            )
+        # for bs in b_size_selection:
+        stats.probplot(
+            (grouped.get_group(bs)["loss"] - self.mean) ** 2,
+            dist=stats.chi2(df=1),
+            plot=axs[1, 1],
+        )
         for idx, line in enumerate(axs[1, 1].get_lines()):
-            line.set_color(f"C{idx//2}")
+            # line.set_color(f"C{idx//2}")
             if idx % 2 == 0:  # scatter
                 line.set_markersize(1)
-                line.set_label(f"b={b_size_selection[idx//2]}")
+                line.set_label(f"b={bs}")
             if idx % 2 == 1:
                 line.set_linestyle("--")
         axs[1, 1].set_title("")
@@ -266,17 +267,17 @@ class IsotropicCovariance:
 
         axs[2, 0].legend(loc="upper left")
 
-        for bs in b_size_selection:
-            stats.probplot(
-                grouped.get_group(bs)["sq_grad_norm"],
-                dist=stats.chi2(df=dims),
-                plot=axs[2, 1],
-            )
+        # for bs in b_size_selection:
+        stats.probplot(
+            grouped.get_group(bs)["sq_grad_norm"],
+            dist=stats.chi2(df=dims),
+            plot=axs[2, 1],
+        )
         for idx, line in enumerate(axs[2, 1].get_lines()):
-            line.set_color(f"C{idx//2}")
+            # line.set_color(f"C{idx//2}")
             if idx % 2 == 0:  # scatter
                 line.set_markersize(1)
-                line.set_label(f"b={b_size_selection[idx//2]}")
+                line.set_label(f"b={bs}")
             if idx % 2 == 1:
                 line.set_linestyle("--")
         axs[2, 1].set_title("")
@@ -291,13 +292,12 @@ class IsotropicCovariance:
             },
         )
 
-    def auto_fit(self, model_factory, loss, data, cache=None, tol=1e-3):
+    def auto_fit(self, model_factory, loss, data, cache=None, tol=1e-3, budget_per_it=6000):
         dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
         sampler = IsotropicSampler(model_factory, loss, data)
 
         cached_samples = CachedSamples(cache)
         rel_error = 1
-        budget = 0.1 * len(data)
         while rel_error > tol:
             existing_samples = cached_samples.as_dataframe()
             try:
@@ -305,7 +305,7 @@ class IsotropicCovariance:
             except KeyError:
                 existing_b_size_counts = pd.Series()
             b_size_counts = batchsize_counts(
-                budget,
+                budget_per_it,
                 self.var_reg,
                 existing_b_size_counts,
             )
@@ -314,7 +314,7 @@ class IsotropicCovariance:
             self.fit(samples, dims)
             var_mean = self.var_reg.intercept_
             var_var = empirical_intercept_variance(
-                samples["batchsizes"].value_counts(),
+                samples["batchsize"].value_counts(),
                 self.var_reg
             )
             rel_error = var_var / var_mean
