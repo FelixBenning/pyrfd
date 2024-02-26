@@ -21,7 +21,7 @@ def empirical_intercept_variance(counts, var_reg):
     n = sum(counts)
     dist = stats.rv_discrete(
         name="epirical batchsize distribution",
-        values=(pd.Index(counts), (counts / n).to_numpy()),
+        values=(counts.index.to_numpy(), (counts / n).to_numpy()),
     )
     theta = dist.expect(func=lambda x: 1 / sq_error_var(var_reg, x))
     w_1st_mom = dist.expect(func=lambda x: 1 / (sq_error_var(var_reg, x) * x))
