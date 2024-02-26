@@ -5,19 +5,19 @@ from scipy import optimize, stats
 import pandas as pd
 from time import time
 
-
-def sq_error_var(var_reg, b):
-    return 3 * var_reg.predict((1 / np.asarray(b)).reshape(-1, 1)) ** 2
-
-
 DEFAULT_VAR_REG = LinearRegression()
 DEFAULT_VAR_REG.intercept_ = 0.05
 DEFAULT_VAR_REG.coef_ = np.array([1])
 
 CUTOFF = 20  # no batch-sizes below
 
+def sq_error_var(var_reg, b):
+    return 3 * var_reg.predict((1 / np.asarray(b)).reshape(-1, 1)) ** 2
+
 
 def empirical_intercept_variance(counts, var_reg):
+    """
+    """
     n = sum(counts)
     dist = stats.rv_discrete(
         name="epirical batchsize distribution",
@@ -26,7 +26,7 @@ def empirical_intercept_variance(counts, var_reg):
     theta = dist.expect(func=lambda x: 1 / sq_error_var(var_reg, x))
     w_1st_mom = dist.expect(func=lambda x: 1 / (sq_error_var(var_reg, x) * x))
     w_2nd_mom = dist.expect(func=lambda x: 1 / (sq_error_var(var_reg, x) * (x**2)))
-    return w_2nd_mom / (n * theta * w_2nd_mom - w_1st_mom**2)
+    return w_2nd_mom / (n * (theta * w_2nd_mom - w_1st_mom**2))
 
 
 def limit_intercept_variance(dist: stats.rv_discrete, var_reg):
@@ -63,17 +63,20 @@ def batchsize_dist(var_reg=DEFAULT_VAR_REG):
     if var_reg == DEFAULT_VAR_REG:
         return gibbs_dist(weights)
 
-    print("Optimizing over batchsize distribution")
+    print("Optimizing over batchsize distribution using Nelder-Mead")
+    def callback(x):
+        print(f"> current parameters: {np.exp(x)})                        ", end="\r")
+
     start = time()
     res = optimize.minimize(
         lambda log_w: limit_intercept_variance(gibbs_dist(np.exp(log_w)), var_reg),
         np.log(weights),
         method="Nelder-Mead",
-        callback=lambda x: print(f"> current parameters: {np.exp(x)})", end="\r"),
+        callback=callback,
     )
     end = time()
     weights = np.exp(res.x)
-    print(f"> Final batchsize distribution parameters: {weights}")
+    print(f"> Final batchsize distribution parameters: {weights}                       ")
     print(f"> {res.message}")
     print(f"> Time Elapsed: {end-start:.0f} (seconds)")
 
@@ -91,7 +94,10 @@ def batchsize_counts(
     support = range(int(a), int(b) + 1)
     df = pd.DataFrame(index=support, data={"desired_dist": optimal_dist.pmf(support)})
     df["desired_counts"] = df["desired_dist"] * total / optimal_dist.mean()
+
+    pd.set_option("future.no_silent_downcasting", True) # remove warning
     df = df.join(existing_b_size_samples.to_frame("existing_counts")).fillna(0)
+
     df["required_counts"] = df["desired_counts"] - df["existing_counts"]
     req_cts = df[df["required_counts"] > 0]["required_counts"]
     df["required_distribution"] = req_cts / req_cts.sum() 
@@ -102,7 +108,7 @@ def batchsize_counts(
     )
 
     est_sample_num = np.ceil(budget / required_dist.mean()).astype(int)
-    b_size_samples = required_dist.rvs(size=est_sample_num + 500, random_state=1)
+    b_size_samples = required_dist.rvs(size=est_sample_num + 500, random_state=int(time()))
     last_idx = np.searchsorted(np.cumsum(b_size_samples), budget)
 
     required_counts = (

@@ -17,6 +17,9 @@ class CachedSamples:
     
     def as_dataframe(self):
         return pd.DataFrame.from_records(self.records)
+    
+    def __len__(self):
+        return len(self.records)
 
     def __enter__(self):
         return self.records
@@ -53,8 +56,8 @@ class IsotropicSampler:
         self.loader = loader
         self.loss_sample = loss_sample
     
-    def sample(self, bsize_counts:pd.Series, cachedSamples=CachedSamples()):
-        with cachedSamples as records:
+    def sample(self, bsize_counts:pd.Series, append_to:CachedSamples=CachedSamples()):
+        with append_to as records:
             total_work = sum([bsize * count for bsize, count in bsize_counts.items()])
             with tqdm(total=total_work, unit="samples") as pbar:
                 for b_size, count in bsize_counts.items():

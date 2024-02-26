@@ -9,7 +9,11 @@ import matplotlib.pyplot as plt
 import torch
 from scipy import stats
 
-from pyrfd.batchsize import DEFAULT_VAR_REG, batchsize_counts, empirical_intercept_variance
+from pyrfd.batchsize import (
+    DEFAULT_VAR_REG,
+    batchsize_counts,
+    empirical_intercept_variance,
+)
 
 from .sampling import CachedSamples, IsotropicSampler
 
@@ -117,6 +121,7 @@ class IsotropicCovariance:
         self.g_var_reg: LinearRegression = isotropic_derivative_var_estimation(
             df["batchsize"], df["sq_grad_norm"]
         )
+        self.fitted = True
 
         ## ============================
         ### === sanity check plots ===
@@ -292,33 +297,50 @@ class IsotropicCovariance:
             },
         )
 
-    def auto_fit(self, model_factory, loss, data, cache=None, tol=1e-3, budget_per_it=6000):
+    def auto_fit(
+        self,
+        model_factory,
+        loss,
+        data,
+        cache=None,
+        tol=0.4,
+        initial_budget=6000,
+        max_iter=10,
+    ):
         dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
         sampler = IsotropicSampler(model_factory, loss, data)
 
         cached_samples = CachedSamples(cache)
-        rel_error = 1
-        while rel_error > tol:
-            existing_samples = cached_samples.as_dataframe()
-            try:
-                existing_b_size_counts = existing_samples["batchsize"].value_counts()
-            except KeyError:
+        for _ in range(max_iter):
+            samples = cached_samples.as_dataframe() # COPY of cached_samples, not ref
+            if len(samples>0):
+                try:
+                    self.fit(samples, dims)
+                except Exception as e:
+                    print("fitting did not go to plan")
+                    raise e # see what other exceptions are possible
+                
+                existing_b_size_counts = samples["batchsize"].value_counts()
+            else:
                 existing_b_size_counts = pd.Series()
+
+            var_mean = self.var_reg.intercept_
+            if self.fitted and var_mean > 0:
+                # might be a reasonable estimate, try using it
+                var_var = empirical_intercept_variance(
+                    samples["batchsize"].value_counts(), self.var_reg
+                )
+                rel_error = np.sqrt(var_var) / var_mean
+
+                if rel_error < tol:
+                    break  # stop early
+
             b_size_counts = batchsize_counts(
-                budget_per_it,
+                initial_budget,
                 self.var_reg,
                 existing_b_size_counts,
             )
-            sampler.sample(b_size_counts, cached_samples)
-            samples = cached_samples.as_dataframe()
-            self.fit(samples, dims)
-            var_mean = self.var_reg.intercept_
-            var_var = empirical_intercept_variance(
-                samples["batchsize"].value_counts(),
-                self.var_reg
-            )
-            rel_error = var_var / var_mean
-
+            sampler.sample(b_size_counts, append_to=cached_samples)
 
 
 class SquaredExponential(IsotropicCovariance):
