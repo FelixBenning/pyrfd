@@ -8,15 +8,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 from scipy import stats
+from tqdm import tqdm
 
-from pyrfd.batchsize import (
+from .batchsize import (
     DEFAULT_VAR_REG,
     batchsize_counts,
     empirical_intercept_variance,
+    limit_intercept_variance,
 )
 
-from .sampling import CachedSamples, IsotropicSampler
-
+from .sampling import CachedSamples, IsotropicSampler, _budget
 
 def selection(sorted_list, num_elts):
     """
@@ -29,7 +30,14 @@ def selection(sorted_list, num_elts):
     return sorted_list[idxs]
 
 
-def fit_mean_var(batch_sizes: np.array, batch_losses: np.array, max_bootstrap=100):
+def fit_mean_var(
+    batch_sizes: np.array,
+    batch_losses: np.array,
+    *,
+    max_bootstrap=100,
+    var_reg=DEFAULT_VAR_REG,
+    logging=False,
+):
     batch_sizes = np.array(batch_sizes)
     batch_losses = np.array(batch_losses)
     b_inv = 1 / batch_sizes
@@ -58,7 +66,8 @@ def fit_mean_var(batch_sizes: np.array, batch_losses: np.array, max_bootstrap=10
         )
 
         if math.isclose(old_intercept, var_reg.intercept_):
-            print(f"Bootstrapping WLS converged in {idx} iterations")
+            if logging:
+                tqdm.write(f"Bootstrapping WLS converged in {idx} iterations")
             return {"mean": mu, "var_regression": var_reg}
 
     warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
@@ -66,15 +75,15 @@ def fit_mean_var(batch_sizes: np.array, batch_losses: np.array, max_bootstrap=10
 
 
 def isotropic_derivative_var_estimation(
-    batch_sizes: np.array, sq_grad_norms: np.array, max_bootstrap=100
+    batch_sizes: np.array,
+    sq_grad_norms: np.array,
+    *,
+    max_bootstrap=100,
+    g_var_reg=DEFAULT_VAR_REG,
+    logging=False,
 ) -> LinearRegression:
     batch_sizes = np.array(batch_sizes)
     b_inv: np.array = 1 / batch_sizes
-
-    g_var_reg = LinearRegression(fit_intercept=True)
-    g_var_reg.fit(
-        np.array([[0], [1]]), np.array([0, 1])
-    )  # initialize with beta0=1 and beta1=1
 
     # bootstrapping WLS
     for idx in range(max_bootstrap):
@@ -90,7 +99,8 @@ def isotropic_derivative_var_estimation(
         g_var_reg.fit(b_inv.reshape(-1, 1), sq_grad_norms, sample_weight=(1 / vars**2))
 
         if math.isclose(old_bias, g_var_reg.intercept_):
-            print(f"Bootstrapping WLS converged in {idx} iterations")
+            if logging:
+                tqdm.write(f"Bootstrapping WLS converged in {idx} iterations")
             return g_var_reg
 
     warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
@@ -114,12 +124,12 @@ class IsotropicCovariance:
         if ("sq_grad_norm" not in df) and ("grad_norm" in df):
             df["sq_grad_norm"] = df["grad_norm"] ** 2
 
-        tmp = fit_mean_var(df["batchsize"], df["loss"])
+        tmp = fit_mean_var(df["batchsize"], df["loss"], var_reg=self.var_reg)
         self.mean = tmp["mean"]
         self.var_reg: LinearRegression = tmp["var_regression"]
 
         self.g_var_reg: LinearRegression = isotropic_derivative_var_estimation(
-            df["batchsize"], df["sq_grad_norm"]
+            df["batchsize"], df["sq_grad_norm"], g_var_reg=self.g_var_reg
         )
         self.fitted = True
 
@@ -311,36 +321,81 @@ class IsotropicCovariance:
         sampler = IsotropicSampler(model_factory, loss, data)
 
         cached_samples = CachedSamples(cache)
+        budget = initial_budget
+        outer_pgb = None
         for _ in range(max_iter):
-            samples = cached_samples.as_dataframe() # COPY of cached_samples, not ref
-            if len(samples>0):
-                try:
-                    self.fit(samples, dims)
-                except Exception as e:
-                    print("fitting did not go to plan")
-                    raise e # see what other exceptions are possible
-                
-                existing_b_size_counts = samples["batchsize"].value_counts()
-            else:
-                existing_b_size_counts = pd.Series()
+            # COPY of cached_samples, not ref
+            samples = cached_samples.as_dataframe()
+
+            bsize_counts = pd.Series()
+            if len(cached_samples) > 0:
+                bsize_counts = samples["batchsize"].value_counts()
+
+            total_samples = _budget(bsize_counts)
+            if total_samples >= initial_budget:
+                self.fit(samples, dims)
 
             var_mean = self.var_reg.intercept_
-            if self.fitted and var_mean > 0:
-                # might be a reasonable estimate, try using it
-                var_var = empirical_intercept_variance(
-                    samples["batchsize"].value_counts(), self.var_reg
-                )
+            if var_mean <= 0: 
+                # negative variance est -> reset
+                self.fitted = False
+                self.var_reg = DEFAULT_VAR_REG
+
+            if self.fitted:
+                var_var = empirical_intercept_variance(bsize_counts, self.var_reg)
                 rel_error = np.sqrt(var_var) / var_mean
+                tqdm.write(f"Estimated relative error:               {rel_error}")
 
                 if rel_error < tol:
                     break  # stop early
 
-            b_size_counts = batchsize_counts(
-                initial_budget,
+                dist = stats.rv_discrete(
+                    values=(bsize_counts.index, bsize_counts / sum(bsize_counts))
+                )
+                lim_sdv = (
+                    np.sqrt(limit_intercept_variance(dist, self.var_reg)) / var_mean
+                )
+                # need: lim_sdv/sqrt(budget) < tol
+                pred_necessary_budget = (lim_sdv / tol) ** 2
+
+                # allocate budget in 20% chunks to allow for early stopping
+                budget = min(
+                    pred_necessary_budget / 5,
+                    (pred_necessary_budget - total_samples) * 1.1,
+                )
+
+                ## PROGRESS Logging ================================================
+                tqdm.write(
+                    f"          samples needed (for tol={tol:.2}): {pred_necessary_budget:.0f}"
+                )
+                if not outer_pgb:
+                    outer_pgb = tqdm(
+                        total=int(np.ceil(pred_necessary_budget)),
+                        desc="Progress in estimated samples needed",
+                        unit="samples",
+                        position=0,
+                        leave=False,
+                    )
+                    outer_pgb.update(total_samples)
+                else:
+                    outer_pgb.total = int(np.ceil(pred_necessary_budget))
+                outer_pgb.refresh()
+                ## PROGRESS ======================================================
+
+
+            needed_bsize_counts = batchsize_counts(
+                budget,
                 self.var_reg,
-                existing_b_size_counts,
+                bsize_counts,
             )
-            sampler.sample(b_size_counts, append_to=cached_samples)
+            budget_use = sampler.sample(
+                needed_bsize_counts,
+                append_to=cached_samples,
+            )
+            if outer_pgb:
+                outer_pgb.update(budget_use)
+        if outer_pgb:
+            outer_pgb.close()
 
 
 class SquaredExponential(IsotropicCovariance):

@@ -1,12 +1,15 @@
 from ctypes import ArgumentError
-from sklearn.linear_model import LinearRegression
 import numpy as np
 from scipy import optimize, stats
 import pandas as pd
 from time import time
+from sklearn.linear_model import LinearRegression
+from tqdm import tqdm
 
+
+# "arbitrary" design
 DEFAULT_VAR_REG = LinearRegression()
-DEFAULT_VAR_REG.intercept_ = 0.05
+DEFAULT_VAR_REG.intercept_ = 0.05  # should be greater zero - cf. sampling
 DEFAULT_VAR_REG.coef_ = np.array([1])
 
 CUTOFF = 20  # no batch-sizes below
@@ -36,7 +39,7 @@ def limit_intercept_variance(dist: stats.rv_discrete, var_reg):
     return (dist.mean() * w_2nd_mom) / (theta * w_2nd_mom - w_1st_mom**2)
 
 
-def batchsize_dist(var_reg=DEFAULT_VAR_REG):
+def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):
     beta_0 = var_reg.intercept_
     beta_1 = var_reg.coef_[0]
     if beta_0 <= 0:
@@ -63,9 +66,15 @@ def batchsize_dist(var_reg=DEFAULT_VAR_REG):
     if var_reg == DEFAULT_VAR_REG:
         return gibbs_dist(weights)
 
-    print("Optimizing over batchsize distribution using Nelder-Mead")
-    def callback(x):
-        print(f"> current parameters: {np.exp(x)})                        ", end="\r")
+    if logging:
+        tqdm.write("Optimizing over batchsize distribution using Nelder-Mead")
+    
+        def callback(x):
+            tqdm.write(f"> current parameters: {np.exp(x)})                        ", end="\r")
+    else:
+        def callback(x):
+            pass
+
 
     start = time()
     res = optimize.minimize(
@@ -76,9 +85,10 @@ def batchsize_dist(var_reg=DEFAULT_VAR_REG):
     )
     end = time()
     weights = np.exp(res.x)
-    print(f"> Final batchsize distribution parameters: {weights}                       ")
-    print(f"> {res.message}")
-    print(f"> Time Elapsed: {end-start:.0f} (seconds)")
+    if logging:
+        tqdm.write(f"> Final batchsize distribution parameters: {weights}                       ")
+        tqdm.write(f"> {res.message}")
+        tqdm.write(f"> Time Elapsed: {end-start:.0f} (seconds)")
 
     return gibbs_dist(weights)
 
@@ -109,7 +119,7 @@ def batchsize_counts(
 
     est_sample_num = np.ceil(budget / required_dist.mean()).astype(int)
     b_size_samples = required_dist.rvs(size=est_sample_num + 500, random_state=int(time()))
-    last_idx = np.searchsorted(np.cumsum(b_size_samples), budget)
+    last_idx = np.searchsorted(np.cumsum(b_size_samples), budget) + 1
 
     required_counts = (
         pd.Series(b_size_samples[:last_idx]).value_counts(sort=False).sort_index()
@@ -118,7 +128,7 @@ def batchsize_counts(
 
 
 if __name__ == "__main__":
-    print(batchsize_counts(10_000))
+    tqdm.write(batchsize_counts(10_000))
     # x= range(20,100)
     # plt.plot(x, dist.pmf(x), "ro", ms=12,mec="r")
     # X = batchsize_counts(1000)
