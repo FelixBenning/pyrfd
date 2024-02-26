@@ -317,13 +317,30 @@ class IsotropicCovariance:
         initial_budget=6000,
         max_iter=10,
     ):
+        """
+        Automatically fit the covariance model
+        ------
+
+        Paremeters:
+        1. A `model_factory` which returns the same randomly initialized [!] model every time it is called
+        2. A `loss` function e.g. torch.nn.functional.nll_loss which accepts a prediction and a true value
+        3. data, which can be passed to `torch.utils.DataLoader` with different batch size parameters such
+            that it returns (x,y) tuples when iterated on
+        """
         dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
+        print(f"\n\nAutomatically fitting Covariance Model: {repr(self)}")
+
         sampler = IsotropicSampler(model_factory, loss, data)
+
+        if cache:
+            print("Tip: You can cancel sampling at any time, samples will be saved in the cache.")
+        else:
+            warning("Without a cache it is necessary to re-fit the covariance model every time. Please pass a filepath to the cache parameter")
 
         cached_samples = CachedSamples(cache)
         budget = initial_budget
         outer_pgb = None
-        for _ in range(max_iter):
+        for idx in range(max_iter):
             # COPY of cached_samples, not ref
             samples = cached_samples.as_dataframe()
 
@@ -344,9 +361,12 @@ class IsotropicCovariance:
             if self.fitted:
                 var_var = empirical_intercept_variance(bsize_counts, self.var_reg)
                 rel_error = np.sqrt(var_var) / var_mean
+                tqdm.write(f"\nCheckpoint {idx}:")
+                tqdm.write("-----------------------------------------------------------")
                 tqdm.write(f"Estimated relative error:               {rel_error}")
 
                 if rel_error < tol:
+                    tqdm.write(f"\nSucessfully fitted the Covariance model to a relative error <{tol}")
                     break  # stop early
 
                 dist = stats.rv_discrete(
@@ -403,13 +423,13 @@ class SquaredExponential(IsotropicCovariance):
     def variance(self):
         if self.fitted:
             return self.var_reg.intercept_
-        raise ArgumentError("The covariance is not fitted yet")
+        raise ArgumentError("The covariance is not fitted yet, use `auto_fit` or `fit` before use")
 
     @property
     def scale(self):
         if self.fitted:
             return np.sqrt(self.variance * self.dims / self.g_var_reg.intercept_)
-        raise ArgumentError("The covariance is not fitted yet")
+        raise ArgumentError("The covariance is not fitted yet, use `auto_fit` or `fit` before use")
 
     def learning_rate(self, loss, grad_norm):
         """RFD learning rate from Random Function Descent paper"""
