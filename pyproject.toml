@@ -6,7 +6,7 @@ authors = ["Felix Benning <felix.benning@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.8"
 torch = "^2.2.0"
 numpy = "^1.26.4"
 torchvision = "^0.17.0"
@@ -21,6 +21,7 @@ matplotlib = "^3.8.3"
 pytest = "^8.0.0"
 black = "^24.2.0"
 matplotlib = "^3.8.3"
+pylint = "^3.1.0"
 
 [build-system]
 requires = ["poetry-core"]
