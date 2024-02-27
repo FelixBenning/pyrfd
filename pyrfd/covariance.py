@@ -317,8 +317,6 @@ class IsotropicCovariance:
             alpha=0.3,
         )
 
-        # TODO: figure out wtf is wrong with the confidence interval of the squared norm
-
         axs[2, 0].legend(loc="upper left")
 
         # for bs in b_size_selection:
