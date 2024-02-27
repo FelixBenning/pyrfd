@@ -6,7 +6,7 @@ authors = ["Felix Benning <felix.benning@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.8"
+python = "^3.9"
 torch = "^2.2.0"
 numpy = "^1.26.4"
 torchvision = "^0.17.0"
