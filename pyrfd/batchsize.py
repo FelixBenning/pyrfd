@@ -1,6 +1,7 @@
 """
 Module for optimally sampling batch sizes for better variance estimates.
 """
+
 from time import time
 from ctypes import ArgumentError
 import numpy as np
@@ -20,7 +21,7 @@ CUTOFF = 20  # no batch-sizes below
 
 
 def sq_error_var(var_reg, b):
-    """ calculate the 4th moment (for Gaussian rvs) i.e. variance of centered
+    """calculate the 4th moment (for Gaussian rvs) i.e. variance of centered
     squares, where the variance regression determines their variance for
     different batchsizes"""
     return 3 * var_reg.predict((1 / np.asarray(b)).reshape(-1, 1)) ** 2

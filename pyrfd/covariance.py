@@ -172,9 +172,9 @@ class IsotropicCovariance:
         )
         self.fitted = True
 
-        ## ============================
-        ### === sanity check plots ===
-        ## ============================
+        # ============================
+        # === sanity check plots ===
+        # ============================
         grouped = df.groupby("batchsize", sort=True)
         b_size_grouped = grouped.agg(
             loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
@@ -192,7 +192,7 @@ class IsotropicCovariance:
 
         fig, axs = plt.subplots(3, 2)
 
-        ## ==== Plot Losses =====
+        # ==== Plot Losses =====
         axs[0, 0].set_xscale("log")
         # axs[0,0].set_xlabel("1/b")
 
@@ -224,7 +224,7 @@ class IsotropicCovariance:
         # legend
         axs[0, 0].legend(loc="upper left")
 
-        ## QQplot
+        # QQplot
         # b_size_selection = np.array(selection(b_size_grouped["batchsize"], 5))[1:]
         # for bs in b_size_selection:
         bsize_counts = df["batchsize"].value_counts(sort=True, ascending=False)
@@ -241,7 +241,7 @@ class IsotropicCovariance:
         axs[0, 1].set_xlabel("")
         axs[0, 1].legend()
 
-        ## === Plot squared errors =====
+        # === Plot squared errors =====
         # axs[1,0].set_xlabel("1/b")
         # axs[1,0].set_xscale("log")
         axs[1, 0].scatter(
@@ -433,7 +433,7 @@ class IsotropicCovariance:
                     (pred_necessary_budget - total_samples) * 1.1,
                 )
 
-                ## PROGRESS Logging ================================================
+                # PROGRESS Logging ================================================
                 tqdm.write(
                     f"          samples needed (for tol={tol:.2}): {pred_necessary_budget:.0f}"
                 )
@@ -449,7 +449,7 @@ class IsotropicCovariance:
                 else:
                     outer_pgb.total = int(np.ceil(pred_necessary_budget))
                 outer_pgb.refresh()
-                ## PROGRESS ======================================================
+                # PROGRESS ======================================================
 
             needed_bsize_counts = batchsize_counts(
                 budget,

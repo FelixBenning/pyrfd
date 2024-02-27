@@ -1,6 +1,7 @@
 """
 Module for sampling the loss at different batch sizes for covariance estimation.
 """
+
 import time
 from pathlib import Path
 
@@ -19,6 +20,7 @@ class CachedSamples:
     Acts as a context manager when adding new samples to allows for KeyboardInterrupt
     while still saving all generated samples so far. Saving them to file
     """
+
     def __init__(self, filename=None):
         self.filename = filename
         if filename is None:
@@ -30,7 +32,7 @@ class CachedSamples:
                 self.records = []
 
     def as_dataframe(self):
-        """ Returns a copy (not reference!) of the current samples in the form of a dataframe """
+        """Returns a copy (not reference!) of the current samples in the form of a dataframe"""
         return pd.DataFrame.from_records(self.records)
 
     def __len__(self):
@@ -46,8 +48,9 @@ class CachedSamples:
 
 
 class IsotropicSampler:
-    """ Sampling the loss function under the isotropy assumption (i.e. randomly
-    samples inputs and does not treat them differently) """
+    """Sampling the loss function under the isotropy assumption (i.e. randomly
+    samples inputs and does not treat them differently)"""
+
     def __init__(self, model_factory, loss, data) -> None:
         def loader(b_size):
             return torch.utils.data.DataLoader(data, batch_size=b_size, shuffle=True)
@@ -78,8 +81,8 @@ class IsotropicSampler:
         bsize_counts: pd.Series,
         append_to: CachedSamples = CachedSamples(),
     ):
-        """ sample the batchsize counts and append them to the cached samples
-        (which are used as a context manager to allow for KeyboardInterupt) """
+        """sample the batchsize counts and append them to the cached samples
+        (which are used as a context manager to allow for KeyboardInterupt)"""
         budget = _budget(bsize_counts)
         with append_to as records:
             with tqdm(

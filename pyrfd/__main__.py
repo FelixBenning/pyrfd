@@ -1,6 +1,7 @@
 """
 Example usage of the RFD module
 """
+
 import torch
 import torchvision as tv
 from mnistSimpleCNN.models.modelM3 import ModelM3
