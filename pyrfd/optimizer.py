@@ -1,3 +1,7 @@
+""" Random Function Descent (RFD) optimizer implementing the pytorch optimizer
+interface
+"""
+
 import torch
 from torch.optim.optimizer import Optimizer
 
@@ -8,10 +12,10 @@ class RFD(Optimizer):
     """Random Function Descent (RFD) optimizer"""
 
     def __init__(self, params, *, covariance_model: IsotropicCovariance, momentum=0):
-        defaults = dict(cov=covariance_model, momentum=momentum)
+        defaults = {"cov": covariance_model, "momentum": momentum}
         super().__init__(params, defaults)
 
-    def step(self, closure):
+    def step(self, closure):  # pylint: disable=locally-disabled, signature-differs
         """Performs a single optimization step.
 
         Args:
@@ -46,7 +50,8 @@ class RFD(Optimizer):
                         if "velocity" in state.keys():
                             velocity = state["velocity"]
                             velocity.mul_(momentum).add_(param.grad, alpha=-1)
-                            # multiply the current velocity by momentum parameter and subtract the current gradient (in-place)
+                            # multiply the current velocity by momentum
+                            # parameter and subtract the current gradient (in-place)
                         else:
                             velocity = torch.mul(param.grad, -1)
 

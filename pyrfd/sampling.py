@@ -1,13 +1,24 @@
-import pandas as pd
-import torch
-from tqdm import tqdm
+"""
+Module for sampling the loss at different batch sizes for covariance estimation.
+"""
 import time
 from pathlib import Path
 
+import pandas as pd
+import torch
+from tqdm import tqdm
+
+
 def _budget(bsize_counts):
-    return sum([bsize * count for bsize, count in bsize_counts.items()])
+    return sum(bsize * count for bsize, count in bsize_counts.items())
+
 
 class CachedSamples:
+    """Abstraction for samples collected so far
+
+    Acts as a context manager when adding new samples to allows for KeyboardInterrupt
+    while still saving all generated samples so far. Saving them to file
+    """
     def __init__(self, filename=None):
         self.filename = filename
         if filename is None:
@@ -19,6 +30,7 @@ class CachedSamples:
                 self.records = []
 
     def as_dataframe(self):
+        """ Returns a copy (not reference!) of the current samples in the form of a dataframe """
         return pd.DataFrame.from_records(self.records)
 
     def __len__(self):
@@ -34,17 +46,19 @@ class CachedSamples:
 
 
 class IsotropicSampler:
+    """ Sampling the loss function under the isotropy assumption (i.e. randomly
+    samples inputs and does not treat them differently) """
     def __init__(self, model_factory, loss, data) -> None:
         def loader(b_size):
             return torch.utils.data.DataLoader(data, batch_size=b_size, shuffle=True)
 
-        def loss_sample(input, target):
+        def loss_sample(input_x, target_y):
             model = model_factory()
             # this is a weird way to set the gradients to zero but pytorch...
             torch.optim.SGD(model.parameters()).zero_grad()
             with torch.enable_grad():
-                prediction = model(input)
-                sample_loss = loss(prediction, target)
+                prediction = model(input_x)
+                sample_loss = loss(prediction, target_y)
                 sample_loss.backward()
 
             with torch.no_grad():
@@ -64,6 +78,8 @@ class IsotropicSampler:
         bsize_counts: pd.Series,
         append_to: CachedSamples = CachedSamples(),
     ):
+        """ sample the batchsize counts and append them to the cached samples
+        (which are used as a context manager to allow for KeyboardInterupt) """
         budget = _budget(bsize_counts)
         with append_to as records:
             with tqdm(
@@ -74,14 +90,12 @@ class IsotropicSampler:
                 leave=False,
             ) as progress:
                 for b_size, count in bsize_counts.items():
-                    self.sample_batchloss(
+                    self._sample_batchloss(
                         b_size, count, append_to=records, progress=progress
                     )
         return budget
 
-    def sample_batchloss(
-        self, b_size, count, append_to=[], progress: tqdm | None = None
-    ):
+    def _sample_batchloss(self, b_size, count, append_to, progress: tqdm | None = None):
         data_loader = self.loader(b_size)
         data_iter = iter(data_loader)
         for _ in range(count):

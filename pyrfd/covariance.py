@@ -1,3 +1,8 @@
+"""
+Module providing Covariance models to pass to RFD. I.e. they can be fitted
+using loss samples and they provide a learning rate
+"""
+
 from abc import abstractmethod
 from ctypes import ArgumentError
 from logging import warning
@@ -19,6 +24,7 @@ from .batchsize import (
 
 from .sampling import CachedSamples, IsotropicSampler, _budget
 
+
 def selection(sorted_list, num_elts):
     """
     return a selection of num_elts from the sorted_list (evenly spaced in the index)
@@ -38,6 +44,13 @@ def fit_mean_var(
     var_reg=DEFAULT_VAR_REG,
     logging=False,
 ):
+    """Bootstraps weighted least squares regression (WLS) to determine the mean,
+    and variance of the loss at varying batchsizes. Returns the mean and variance
+    regression.
+
+    An existing regression can be passed to act as a starting point
+    for the bootstrap.
+    """
     batch_sizes = np.array(batch_sizes)
     batch_losses = np.array(batch_losses)
     b_inv = 1 / batch_sizes
@@ -50,9 +63,11 @@ def fit_mean_var(
 
     # bootstrapping Weighted Least Squares (WLS)
     for idx in range(max_bootstrap):
-        vars = var_reg.predict(b_inv.reshape(-1, 1))  # variance at batchsizes 1/b in X
+        variances = var_reg.predict(
+            b_inv.reshape(-1, 1)
+        )  # variance at batchsizes 1/b in X
 
-        mu = np.average(batch_losses, weights=(1 / vars))
+        mu = np.average(batch_losses, weights=1 / variances)
         centered_squares = (batch_losses - mu) ** 2
 
         old_intercept = var_reg.intercept_
@@ -62,7 +77,7 @@ def fit_mean_var(
         var_reg.fit(
             b_inv.reshape(-1, 1),
             centered_squares,
-            sample_weight=1 / vars**2,
+            sample_weight=1 / variances**2,
         )
 
         if math.isclose(old_intercept, var_reg.intercept_):
@@ -82,12 +97,19 @@ def isotropic_derivative_var_estimation(
     g_var_reg=DEFAULT_VAR_REG,
     logging=False,
 ) -> LinearRegression:
+    """Bootstraps weighted least squares regression (WLS) to determine the
+    expectation of gradient norms of the loss at varying batchsizes.
+    Returns the regression of the mean against 1/b where b is the batchsize.
+
+    An existing regression can be passed to act as a starting point
+    for the bootstrap.
+    """
     batch_sizes = np.array(batch_sizes)
     b_inv: np.array = 1 / batch_sizes
 
     # bootstrapping WLS
     for idx in range(max_bootstrap):
-        vars: np.array = g_var_reg.predict(
+        variances: np.array = g_var_reg.predict(
             b_inv.reshape(-1, 1)
         )  # variances at batchsize 1/b
 
@@ -96,7 +118,9 @@ def isotropic_derivative_var_estimation(
         # out in the weighting we also have a sum of squares (norm), but this
         # also only results in a constant which does not matter
         old_bias = g_var_reg.intercept_
-        g_var_reg.fit(b_inv.reshape(-1, 1), sq_grad_norms, sample_weight=(1 / vars**2))
+        g_var_reg.fit(
+            b_inv.reshape(-1, 1), sq_grad_norms, sample_weight=1 / variances**2
+        )
 
         if math.isclose(old_bias, g_var_reg.intercept_):
             if logging:
@@ -108,18 +132,33 @@ def isotropic_derivative_var_estimation(
 
 
 class IsotropicCovariance:
+    """Abstract isotropic covariance class, providing some fallback methods.
+
+    Can be subclassed for specific covariance models (see e.g. SquaredExponential)
+    """
+
     __slots__ = "mean", "var_reg", "g_var_reg", "dims", "fitted"
 
     def __init__(self) -> None:
         self.fitted = False
         self.var_reg = DEFAULT_VAR_REG
         self.g_var_reg = DEFAULT_VAR_REG
+        self.dims = None
+        self.mean = None
 
     @abstractmethod
     def learning_rate(self, loss, grad_norm):
+        """learning rate of this covariance model from the RFD paper"""
         return NotImplemented
 
     def fit(self, df: pd.DataFrame, dims):
+        """ " Fit the covariance model with loss and gradient norm samples
+        provided in a pandas dataframe, with columns containing:
+
+        - batchsize
+        - loss
+        - grad_norm or sq_grad_norm
+        """
         self.dims = dims
         if ("sq_grad_norm" not in df) and ("grad_norm" in df):
             df["sq_grad_norm"] = df["grad_norm"] ** 2
@@ -322,10 +361,13 @@ class IsotropicCovariance:
         ------
 
         Paremeters:
-        1. A `model_factory` which returns the same randomly initialized [!] model every time it is called
-        2. A `loss` function e.g. torch.nn.functional.nll_loss which accepts a prediction and a true value
-        3. data, which can be passed to `torch.utils.DataLoader` with different batch size parameters such
-            that it returns (x,y) tuples when iterated on
+        1. A `model_factory` which returns the same randomly initialized [!]
+        model every time it is called
+        2. A `loss` function e.g. torch.nn.functional.nll_loss which accepts
+        a prediction and a true value
+        3. data, which can be passed to `torch.utils.DataLoader` with
+        different batch size parameters such that it returns (x,y) tuples when
+        iterated on
         """
         dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
         print(f"\n\nAutomatically fitting Covariance Model: {repr(self)}")
@@ -333,9 +375,14 @@ class IsotropicCovariance:
         sampler = IsotropicSampler(model_factory, loss, data)
 
         if cache:
-            print("Tip: You can cancel sampling at any time, samples will be saved in the cache.")
+            print(
+                "Tip: You can cancel sampling at any time, samples will be saved in the cache."
+            )
         else:
-            warning("Without a cache it is necessary to re-fit the covariance model every time. Please pass a filepath to the cache parameter")
+            warning(
+                "Without a cache it is necessary to re-fit the covariance model"
+                + "every time. Please pass a filepath to the cache parameter"
+            )
 
         cached_samples = CachedSamples(cache)
         budget = initial_budget
@@ -353,7 +400,7 @@ class IsotropicCovariance:
                 self.fit(samples, dims)
 
             var_mean = self.var_reg.intercept_
-            if var_mean <= 0: 
+            if var_mean <= 0:
                 # negative variance est -> reset
                 self.fitted = False
                 self.var_reg = DEFAULT_VAR_REG
@@ -362,11 +409,15 @@ class IsotropicCovariance:
                 var_var = empirical_intercept_variance(bsize_counts, self.var_reg)
                 rel_error = np.sqrt(var_var) / var_mean
                 tqdm.write(f"\nCheckpoint {idx}:")
-                tqdm.write("-----------------------------------------------------------")
+                tqdm.write(
+                    "-----------------------------------------------------------"
+                )
                 tqdm.write(f"Estimated relative error:               {rel_error}")
 
                 if rel_error < tol:
-                    tqdm.write(f"\nSucessfully fitted the Covariance model to a relative error <{tol}")
+                    tqdm.write(
+                        f"\nSucessfully fitted the Covariance model to a relative error <{tol}"
+                    )
                     break  # stop early
 
                 dist = stats.rv_discrete(
@@ -402,7 +453,6 @@ class IsotropicCovariance:
                 outer_pgb.refresh()
                 ## PROGRESS ======================================================
 
-
             needed_bsize_counts = batchsize_counts(
                 budget,
                 self.var_reg,
@@ -419,17 +469,30 @@ class IsotropicCovariance:
 
 
 class SquaredExponential(IsotropicCovariance):
+    """The Squared exponential covariance model. I.e.
+
+        C(x) = self.variance * exp(-x^2/(2*self.scale^2))
+
+    needs to be fitted using .auto_fit or .fit.
+    """
+
     @property
     def variance(self):
+        """the estimated variance (should only be accessed after fitting)"""
         if self.fitted:
             return self.var_reg.intercept_
-        raise ArgumentError("The covariance is not fitted yet, use `auto_fit` or `fit` before use")
+        raise ArgumentError(
+            "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
+        )
 
     @property
     def scale(self):
+        """the estimated scale (should only be accessed after fitting)"""
         if self.fitted:
             return np.sqrt(self.variance * self.dims / self.g_var_reg.intercept_)
-        raise ArgumentError("The covariance is not fitted yet, use `auto_fit` or `fit` before use")
+        raise ArgumentError(
+            "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
+        )
 
     def learning_rate(self, loss, grad_norm):
         """RFD learning rate from Random Function Descent paper"""

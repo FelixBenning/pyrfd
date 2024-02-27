@@ -1,11 +1,15 @@
+"""
+Module for optimally sampling batch sizes for better variance estimates.
+"""
+from time import time
 from ctypes import ArgumentError
 import numpy as np
 from scipy import optimize, stats
 import pandas as pd
-from time import time
 from sklearn.linear_model import LinearRegression
 from tqdm import tqdm
 
+from .sampling import _budget
 
 # "arbitrary" design
 DEFAULT_VAR_REG = LinearRegression()
@@ -14,13 +18,16 @@ DEFAULT_VAR_REG.coef_ = np.array([1])
 
 CUTOFF = 20  # no batch-sizes below
 
+
 def sq_error_var(var_reg, b):
+    """ calculate the 4th moment (for Gaussian rvs) i.e. variance of centered
+    squares, where the variance regression determines their variance for
+    different batchsizes"""
     return 3 * var_reg.predict((1 / np.asarray(b)).reshape(-1, 1)) ** 2
 
 
 def empirical_intercept_variance(counts, var_reg):
-    """
-    """
+    """TODO: change or compare to a bootstrap version, this assumes theory applicable"""
     n = sum(counts)
     dist = stats.rv_discrete(
         name="epirical batchsize distribution",
@@ -33,6 +40,13 @@ def empirical_intercept_variance(counts, var_reg):
 
 
 def limit_intercept_variance(dist: stats.rv_discrete, var_reg):
+    """limiting variance as sample budget grows to infinity, this assumes the
+    number of batch size samples n is related to the buget in the following way:
+        n E[B] < budget
+    where B is the random batch size sampled from dist. Thus n = budget/E[B],
+    and we can replace 1/n by E[B]/budget in the formula. Since we let budget to
+    infinity, we remove the budget to get an asymptotic/convergent formulation.
+    """
     theta = dist.expect(func=lambda x: 1 / sq_error_var(var_reg, x))
     w_1st_mom = dist.expect(func=lambda x: 1 / (sq_error_var(var_reg, x) * x))
     w_2nd_mom = dist.expect(func=lambda x: 1 / (sq_error_var(var_reg, x) * (x**2)))
@@ -40,6 +54,14 @@ def limit_intercept_variance(dist: stats.rv_discrete, var_reg):
 
 
 def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):
+    """Find the optimal batch size distribution (in a Gibbs distribution class)
+    under the assumption that the variance regression var_reg is true. The Gibbs
+    distribution class is of the form
+
+        p(b) = exp(w[0]/(3*var_reg.predict(1/b)**2) - w[1]b)
+
+    and optimized over `w`
+    """
     beta_0 = var_reg.intercept_
     beta_1 = var_reg.coef_[0]
     if beta_0 <= 0:
@@ -68,13 +90,16 @@ def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):
 
     if logging:
         tqdm.write("Optimizing over batchsize distribution using Nelder-Mead")
-    
-        def callback(x):
-            tqdm.write(f"> current parameters: {np.exp(x)})                        ", end="\r")
-    else:
-        def callback(x):
-            pass
 
+        def callback(x):
+            tqdm.write(
+                f"> current parameters: {np.exp(x)})                        ", end="\r"
+            )
+
+    else:
+
+        def callback(_):
+            pass
 
     start = time()
     res = optimize.minimize(
@@ -86,7 +111,9 @@ def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):
     end = time()
     weights = np.exp(res.x)
     if logging:
-        tqdm.write(f"> Final batchsize distribution parameters: {weights}                       ")
+        tqdm.write(
+            f"> Final batchsize distribution parameters: {weights}                       "
+        )
         tqdm.write(f"> {res.message}")
         tqdm.write(f"> Time Elapsed: {end-start:.0f} (seconds)")
 
@@ -96,7 +123,15 @@ def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):
 def batchsize_counts(
     budget, var_reg=DEFAULT_VAR_REG, existing_b_size_samples: pd.Series = pd.Series()
 ):
-    spent_budget = sum([b * count for b, count in existing_b_size_samples.items()])
+    """Determines the optimal batchsize distribution (in a Gibbs distribution class),
+    then adjusts the distribution for existing batchsize samples. (i.e. sample fewer
+    from the existing sizes), such that after `budget` is spent, the distribution
+    should be as close as possible to the optimal distribution. Then samples from
+    this adjusted distribution.
+
+    return a series with counts of batchsizes (where the batchsizes are the index).
+    """
+    spent_budget = _budget(existing_b_size_samples)
     total = spent_budget + budget
     optimal_dist: stats.rv_discrete = batchsize_dist(var_reg)
 
@@ -105,20 +140,23 @@ def batchsize_counts(
     df = pd.DataFrame(index=support, data={"desired_dist": optimal_dist.pmf(support)})
     df["desired_counts"] = df["desired_dist"] * total / optimal_dist.mean()
 
-    pd.set_option("future.no_silent_downcasting", True) # remove warning
+    pd.set_option("future.no_silent_downcasting", True)  # remove warning
     df = df.join(existing_b_size_samples.to_frame("existing_counts")).fillna(0)
 
     df["required_counts"] = df["desired_counts"] - df["existing_counts"]
     req_cts = df[df["required_counts"] > 0]["required_counts"]
-    df["required_distribution"] = req_cts / req_cts.sum() 
+    df["required_distribution"] = req_cts / req_cts.sum()
     df["required_distribution"] = df["required_distribution"].fillna(0)
 
     required_dist = stats.rv_discrete(
         values=(df.index, df["required_distribution"].to_numpy())
     )
 
-    est_sample_num = np.ceil(budget / required_dist.mean()).astype(int)
-    b_size_samples = required_dist.rvs(size=est_sample_num + 500, random_state=int(time()))
+    b_size_samples = required_dist.rvs(
+        # estimate required samples and add padding
+        size=np.ceil(budget / required_dist.mean()).astype(int) + 500,
+        random_state=int(time()),
+    )
     last_idx = np.searchsorted(np.cumsum(b_size_samples), budget) + 1
 
     required_counts = (
