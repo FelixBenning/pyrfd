@@ -34,7 +34,8 @@ jobs:
     - name: Install library
       run: poetry install --no-interaction
 
-    - name: Analysing the code with pylint
+    - name: Linting code
       run: |
         poetry run pylint pyrfd
         poetry run flake8 pyrfd
+        poetry run black --check pyrfd
