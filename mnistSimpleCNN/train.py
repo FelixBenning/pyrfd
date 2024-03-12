@@ -1,4 +1,5 @@
 # imports -------------------------------------------------------------------------#
+from ctypes import ArgumentError
 import os
 import numpy as np
 import torch
@@ -78,11 +79,13 @@ def run(OptClass=lr_scheduled_optimizer(optim.Adam), p_seed=0, p_epochs=10, p_ke
 
     # model selection -------------------------------------------------------------#
     if KERNEL_SIZE == 3:
-        model = ModelM3().to(device)
+        model:torch.nn.Module = ModelM3().to(device)
     elif KERNEL_SIZE == 5:
-        model = ModelM5().to(device)
+        model:torch.nn.Module = ModelM5().to(device)
     elif KERNEL_SIZE == 7:
-        model = ModelM7().to(device)
+        model:torch.nn.Module= ModelM7().to(device)
+    else:
+        raise ArgumentError(f"Kernel Size {KERNEL_SIZE} not suppoted")
 
     summary(model, (1, 28, 28))
 
@@ -114,9 +117,10 @@ def run(OptClass=lr_scheduled_optimizer(optim.Adam), p_seed=0, p_epochs=10, p_ke
         )
         for data, target in pbar:
             data, target = data.to(device), target.to(device, dtype=torch.int64)
+            # pylint: disable=cell-var-from-loop
             def loss_closure():
                 optimizer.zero_grad()
-                output = model(data)
+                output = model(data) # pylint: disable=not-callable
                 loss = F.nll_loss(output, target)
                 train_pred = output.argmax(dim=1, keepdim=True)
 
@@ -147,7 +151,7 @@ def run(OptClass=lr_scheduled_optimizer(optim.Adam), p_seed=0, p_epochs=10, p_ke
         with torch.no_grad():
             for data, target in test_pg:
                 data, target = data.to(device), target.to(device, dtype=torch.int64)
-                output = model(data)
+                output = model(data) # pylint: disable=not-callable
                 test_loss += F.nll_loss(output, target, reduction="sum").item()
                 pred = output.argmax(dim=1, keepdim=True)
                 total_pred = np.append(total_pred, pred.cpu().numpy())
@@ -172,19 +176,18 @@ def run(OptClass=lr_scheduled_optimizer(optim.Adam), p_seed=0, p_epochs=10, p_ke
             "Accuracy": best_test_accuracy
         })
 
-        f = open(OUTPUT_FILE, "a")
-        f.write(
-            " %3d %12.6f %9.3f %12.6f %9.3f %9.3f\n"
-            % (
-                epoch,
-                train_loss,
-                train_accuracy,
-                test_loss,
-                test_accuracy,
-                best_test_accuracy,
+        with open(OUTPUT_FILE, "a") as f:
+            f.write(
+                " %3d %12.6f %9.3f %12.6f %9.3f %9.3f\n"
+                % (
+                    epoch,
+                    train_loss,
+                    train_accuracy,
+                    test_loss,
+                    test_accuracy,
+                    best_test_accuracy,
+                )
             )
-        )
-        f.close()
 
         # --------------------------------------------------------------------------#
         # update learning rate scheduler                                           #
