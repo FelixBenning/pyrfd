@@ -15,8 +15,9 @@ import torch
 from scipy import stats
 from tqdm import tqdm
 
+from  . import plots
+
 from .batchsize import (
-    DEFAULT_VAR_REG,
     batchsize_counts,
     empirical_intercept_variance,
     theoretical_intercept_variance,
@@ -41,7 +42,7 @@ def fit_mean_var(
     batch_losses: np.array,
     *,
     max_bootstrap=100,
-    var_reg=DEFAULT_VAR_REG,
+    var_reg=None,
     logging=False,
 ):
     """Bootstraps weighted least squares regression (WLS) to determine the mean,
@@ -55,11 +56,13 @@ def fit_mean_var(
     batch_losses = np.array(batch_losses)
     b_inv = 1 / batch_sizes
 
-    # we initialize with the assumption that the variance at batch_size=Inf is zero
-    var_reg = LinearRegression(fit_intercept=True)
-    var_reg.fit(
-        np.array([[0], [1]]), np.array([0, 1])
-    )  # initialize with beta0=1 and beta1=1
+    if var_reg is None:
+        var_reg = LinearRegression(fit_intercept=True)
+        # we initialize with the assumption that the variance at batch_size=Inf is zero
+        # this will give large batch sizes outsized weighting at the start which is better
+        # than the other way around, which can easily lead to negative intercept estimations.
+        var_reg.intercept_ = 0
+        var_reg.coef_ = np.array([1])
 
     # bootstrapping Weighted Least Squares (WLS)
     for idx in range(max_bootstrap):
@@ -94,7 +97,7 @@ def isotropic_derivative_var_estimation(
     sq_grad_norms: np.array,
     *,
     max_bootstrap=100,
-    g_var_reg=DEFAULT_VAR_REG,
+    g_var_reg=None,
     logging=False,
 ) -> LinearRegression:
     """Bootstraps weighted least squares regression (WLS) to determine the
@@ -106,6 +109,14 @@ def isotropic_derivative_var_estimation(
     """
     batch_sizes = np.array(batch_sizes)
     b_inv: np.array = 1 / batch_sizes
+
+    if g_var_reg is None:
+        g_var_reg = LinearRegression(fit_intercept=True)
+        # we initialize with the assumption that the variance at batch_size=Inf is zero
+        # this will give large batch sizes outsized weighting at the start which is better
+        # than the other way around, which can easily lead to negative intercept estimations.
+        g_var_reg.intercept_ = 0
+        g_var_reg.coef_ = np.array([1])
 
     # bootstrapping WLS
     for idx in range(max_bootstrap):
@@ -141,23 +152,27 @@ class IsotropicCovariance:
 
     def __init__(
         self,
-        fitted=False,
-        var_reg=DEFAULT_VAR_REG,
-        g_var_reg=DEFAULT_VAR_REG,
-        dims=None,
         mean=None,
+        var_reg=None,
+        g_var_reg=None,
+        dims=None,
+        fitted=False,
     ) -> None:
-        self.fitted = fitted
+        self.mean = mean
         self.var_reg = var_reg
         self.g_var_reg = g_var_reg
         self.dims = dims
-        self.mean = mean
+        self.fitted = fitted
 
     def __repr__(self) -> str:
         return (
-            f"{self.__class__.__name__}(mean={self.mean}, "
-            f"var_reg={self.var_reg}, g_var_reg={self.g_var_reg}, "
-            f"dims={self.dims}, fitted={self.fitted})"
+            f"{self.__class__.__name__}(\n"
+            f"    mean={self.mean},\n"
+            f"    var_reg={self.var_reg},\n"
+            f"    g_var_reg={self.g_var_reg},\n"
+            f"    dims={self.dims},\n"
+            f"    fitted={self.fitted}\n"
+            ")"
         )
 
     @abstractmethod
@@ -165,8 +180,26 @@ class IsotropicCovariance:
         """learning rate of this covariance model from the RFD paper"""
         return NotImplemented
 
+    def asymptotic_learning_rate(self, b_size_inverse=0, limiting_loss=0):
+        """asymptotic learning rate of RFD
+
+        b_size_inverse: The inverse 1/b of the batch size b for which the learning rate is used (default is 0)
+        limiting_loss: The loss at the end of optimization (default is 0)
+        """
+        assert self.fitted, "The covariance has not been fitted yet."
+        assert (
+            b_size_inverse <= 1
+        ), "Please pass the batch size inverse 1/b not the batch size b"
+        enumerator = self.var_reg.predict(b_size_inverse)
+        denominator = (
+            self.g_var_reg.predict(b_size_inverse)
+            / self.dims
+            * (self.mean - limiting_loss)
+        )
+        return enumerator / denominator
+
     def fit(self, df: pd.DataFrame, dims):
-        """ " Fit the covariance model with loss and gradient norm samples
+        """Fit the covariance model with loss and gradient norm samples
         provided in a pandas dataframe, with columns containing:
 
         - batchsize
@@ -187,142 +220,19 @@ class IsotropicCovariance:
         self.fitted = True
 
         return self
-
-    def plot_loss(self, df):
-        grouped = df.groupby("batchsize", sort=True)
-        b_size_grouped = grouped.agg(
-            loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
-            loss_var=pd.NamedAgg(
-                column="loss", aggfunc=lambda x: np.mean((x - self.mean) ** 2)
-            ),
-            sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
-        ).reset_index()
-        b_size_g_inv: np.array = 1 / b_size_grouped["batchsize"]
-        var_estimates = self.var_reg.predict(b_size_g_inv.to_numpy().reshape(-1, 1))
-        reduced_df = df.groupby("batchsize").head(100).reset_index(drop=True)
-        b_size_inv = 1 / reduced_df["batchsize"]
+    
+    def plot_sanity_checks(self, df: pd.DataFrame):
         fig, axs = plt.subplots(3, 2)
-        axs[0, 0].set_xscale("log")
-        # scatterplot
-        axs[0, 0].scatter(
-            b_size_inv,
-            reduced_df["loss"],
-            s=1,  # marker size
-            label=r"$\mathcal{L}_b(w)$",
-        )
-        # batchwise means
-        axs[0, 0].plot(
-            b_size_g_inv,
-            b_size_grouped["loss_mean"],
-            marker="*",
-            label="batchwise mean",
-        )
-        axs[0, 0].plot(
-            b_size_g_inv,
-            np.full_like(b_size_g_inv, fill_value=self.mean),
-            label=rf"$\hat\mu={self.mean:.4}$",
-        )
-        axs[0, 0].fill_between(
-            x=b_size_g_inv,
-            y1=self.mean + stats.norm.ppf(0.025) * np.sqrt(var_estimates),
-            y2=self.mean + stats.norm.ppf(0.975) * np.sqrt(var_estimates),
-            alpha=0.3,
-        )
-        # legend
-        axs[0, 0].legend(loc="upper left")
-        axs[0, 1].set_xlabel("")
-        axs[0, 1].legend()
 
-    def plot_squared_errors(self, df):
-        grouped = df.groupby("batchsize", sort=True)
-        b_size_grouped = grouped.agg(
-            loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
-            loss_var=pd.NamedAgg(
-                column="loss", aggfunc=lambda x: np.mean((x - self.mean) ** 2)
-            ),
-            sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
-        ).reset_index()
-        b_size_g_inv: np.array = 1 / b_size_grouped["batchsize"]
-        var_estimates = self.var_reg.predict(b_size_g_inv.to_numpy().reshape(-1, 1))
-        reduced_df = df.groupby("batchsize").head(100).reset_index(drop=True)
-        b_size_inv = 1 / reduced_df["batchsize"]
-        fig, axs = plt.subplots(3, 2)
-        axs[1, 0].scatter(
-            b_size_inv,
-            (reduced_df["loss"] - self.mean) ** 2,
-            s=1,  # marker size
-            label=r"$(\mathcal{L}_b(w)-\hat{\mu})^2$",
-        )
-        axs[1, 0].plot(
-            b_size_g_inv,
-            b_size_grouped["loss_var"],
-            marker="*",
-            label="batchwise mean squares",
-        )
-        axs[1, 0].plot(
-            b_size_g_inv,
-            var_estimates,
-            label=r"Var$(\mathcal{L}_b(w))$",
-        )
-        axs[1, 0].fill_between(
-            x=b_size_g_inv,
-            # χ^2 confidence bounds
-            y1=var_estimates + (stats.chi2.ppf(0.025, df=1) - 1) * var_estimates,
-            y2=var_estimates + (stats.chi2.ppf(0.975, df=1) - 1) * var_estimates,
-            alpha=0.3,
-        )
-        axs[1, 0].legend(loc="upper left")
-        axs[1, 1].set_title("")
-        axs[1, 1].set_xlabel("")
-        axs[1, 1].legend()
+        plots.plot_loss(axs[0,0], df, mean=self.mean, var_reg=self.var_reg)
+        axs[0,0].set_xscale("log")
+        axs[0,0].set_xlabel("")
 
-    def plot_gradient_norms(self, df):
-        grouped = df.groupby("batchsize", sort=True)
-        b_size_grouped = grouped.agg(
-            loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
-            loss_var=pd.NamedAgg(
-                column="loss", aggfunc=lambda x: np.mean((x - self.mean) ** 2)
-            ),
-            sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
-        ).reset_index()
-        b_size_g_inv: np.array = 1 / b_size_grouped["batchsize"]
-        reduced_df = df.groupby("batchsize").head(100).reset_index(drop=True)
-        b_size_inv = 1 / reduced_df["batchsize"]
-        fig, axs = plt.subplots(3, 2)
-        axs[2, 0].set_xlabel("1/b")
-        axs[2, 0].scatter(
-            b_size_inv,
-            reduced_df["sq_grad_norm"],
-            s=1,  # marker size
-            label=r"$\|\nabla\mathcal{L}_b(w)\|^2$",
-        )
-        axs[2, 0].plot(
-            b_size_g_inv,
-            b_size_grouped["sq_grad_norm_mean"],
-            marker="*",
-            label="batchwise mean",
-        )
-        sq_norm_means = self.g_var_reg.predict(b_size_g_inv.to_numpy().reshape(-1, 1))
-        axs[2, 0].plot(
-            b_size_g_inv,
-            sq_norm_means,
-            label=r"$\mathbb{E}[\|\nabla\mathcal{L}_b(w)\|^2]$",
-        )
-        axs[2, 0].fill_between(
-            x=b_size_g_inv,
-            y1=sq_norm_means
-            + (stats.chi2.ppf(0.025, self.dims) - self.dims)
-            * sq_norm_means
-            / self.dims,
-            y2=sq_norm_means
-            + (stats.chi2.ppf(0.975, self.dims) - self.dims)
-            * sq_norm_means
-            / self.dims,
-            alpha=0.3,
-        )
-        axs[2, 0].legend(loc="upper left")
-        axs[2, 1].set_title("")
-        axs[2, 1].legend()
+        plots.plot_squared_losses(axs[1,0], df, mean=self.mean, var_reg=self.var_reg)
+        axs[1,0].set_xlabel("")
+
+        plots.plot_gradient_norms(axs[2,0], df, g_var_reg=self.g_var_reg, dims=self.dims)
+
 
     def auto_fit(
         self,
@@ -350,19 +260,9 @@ class IsotropicCovariance:
         dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
         print(f"\n\nAutomatically fitting Covariance Model: {repr(self)}")
 
+        cached_samples = CachedSamples(cache)
         sampler = IsotropicSampler(model_factory, loss, data)
 
-        if cache:
-            print(
-                "Tip: You can cancel sampling at any time, samples will be saved in the cache."
-            )
-        else:
-            warning(
-                "Without a cache it is necessary to re-fit the covariance model"
-                + "every time. Please pass a filepath to the cache parameter"
-            )
-
-        cached_samples = CachedSamples(cache)
         budget = initial_budget
         outer_pgb = None
         for idx in range(max_iter):
@@ -381,7 +281,7 @@ class IsotropicCovariance:
             if var_mean <= 0:
                 # negative variance est -> reset
                 self.fitted = False
-                self.var_reg = DEFAULT_VAR_REG
+                self.var_reg = None
 
             if self.fitted:
                 var_var = empirical_intercept_variance(bsize_counts, self.var_reg)
@@ -402,7 +302,8 @@ class IsotropicCovariance:
                     values=(bsize_counts.index, bsize_counts / sum(bsize_counts))
                 )
                 lim_sdv = (
-                    np.sqrt(theoretical_intercept_variance(dist, self.var_reg)) / var_mean
+                    np.sqrt(theoretical_intercept_variance(dist, self.var_reg))
+                    / var_mean
                 )
                 # need: lim_sdv/sqrt(budget) < tol
                 pred_necessary_budget = (lim_sdv / tol) ** 2
@@ -474,9 +375,6 @@ class SquaredExponential(IsotropicCovariance):
 
     def learning_rate(self, loss, grad_norm):
         """RFD learning rate from Random Function Descent paper"""
-        # numerically stable version
-        # (cf. https://en.wikipedia.org/wiki/Numerical_stability#Example)
-        # to avoid catastrophic cancellation in the difference
         tmp = (self.mean - loss) / 2
         return (self.scale**2) / (
             torch.sqrt(tmp**2 + (self.scale * grad_norm) ** 2) + tmp

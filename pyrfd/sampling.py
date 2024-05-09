@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import torch
 from tqdm import tqdm
+from logging import warning
 
 
 def budget_use(bsize_counts):
@@ -24,10 +25,17 @@ class CachedSamples:
     def __init__(self, filename=None):
         self.filename = filename
         if filename is None:
+            warning(
+                "Without a cache it is necessary to re-fit the covariance model"
+                + "every time. Please provide the path to a viable cache location"
+            )
             self.records = []
         else:
             try:
                 self.records = pd.read_csv(filename).to_dict("records")
+                print(
+                    "Tip: You can cancel sampling at any time, samples will be saved in the cache."
+                )
             except FileNotFoundError:
                 self.records = []
 
