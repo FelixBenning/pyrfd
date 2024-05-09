@@ -139,12 +139,26 @@ class IsotropicCovariance:
 
     __slots__ = "mean", "var_reg", "g_var_reg", "dims", "fitted"
 
-    def __init__(self) -> None:
-        self.fitted = False
-        self.var_reg = DEFAULT_VAR_REG
-        self.g_var_reg = DEFAULT_VAR_REG
-        self.dims = None
-        self.mean = None
+    def __init__(
+        self,
+        fitted=False,
+        var_reg=DEFAULT_VAR_REG,
+        g_var_reg=DEFAULT_VAR_REG,
+        dims=None,
+        mean=None,
+    ) -> None:
+        self.fitted = fitted
+        self.var_reg = var_reg
+        self.g_var_reg = g_var_reg
+        self.dims = dims
+        self.mean = mean
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(mean={self.mean}, "
+            f"var_reg={self.var_reg}, g_var_reg={self.g_var_reg}, "
+            f"dims={self.dims}, fitted={self.fitted})"
+        )
 
     @abstractmethod
     def learning_rate(self, loss, grad_norm):
@@ -172,9 +186,9 @@ class IsotropicCovariance:
         )
         self.fitted = True
 
-        # ============================
-        # === sanity check plots ===
-        # ============================
+        return self
+
+    def plot_loss(self, df):
         grouped = df.groupby("batchsize", sort=True)
         b_size_grouped = grouped.agg(
             loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
@@ -185,17 +199,10 @@ class IsotropicCovariance:
         ).reset_index()
         b_size_g_inv: np.array = 1 / b_size_grouped["batchsize"]
         var_estimates = self.var_reg.predict(b_size_g_inv.to_numpy().reshape(-1, 1))
-
-        # only select <100 examples per batch size
         reduced_df = df.groupby("batchsize").head(100).reset_index(drop=True)
         b_size_inv = 1 / reduced_df["batchsize"]
-
         fig, axs = plt.subplots(3, 2)
-
-        # ==== Plot Losses =====
         axs[0, 0].set_xscale("log")
-        # axs[0,0].set_xlabel("1/b")
-
         # scatterplot
         axs[0, 0].scatter(
             b_size_inv,
@@ -223,27 +230,23 @@ class IsotropicCovariance:
         )
         # legend
         axs[0, 0].legend(loc="upper left")
-
-        # QQplot
-        # b_size_selection = np.array(selection(b_size_grouped["batchsize"], 5))[1:]
-        # for bs in b_size_selection:
-        bsize_counts = df["batchsize"].value_counts(sort=True, ascending=False)
-        bs = bsize_counts.index[0]
-        stats.probplot(grouped.get_group(bs)["loss"], dist="norm", plot=axs[0, 1])
-        for idx, line in enumerate(axs[0, 1].get_lines()):
-            # line.set_color(f"C{idx//2}")
-            if idx % 2 == 0:  # scatter
-                line.set_markersize(1)
-                line.set_label(f"b={bs}")
-            if idx % 2 == 1:
-                line.set_linestyle("--")
-
         axs[0, 1].set_xlabel("")
         axs[0, 1].legend()
 
-        # === Plot squared errors =====
-        # axs[1,0].set_xlabel("1/b")
-        # axs[1,0].set_xscale("log")
+    def plot_squared_errors(self, df):
+        grouped = df.groupby("batchsize", sort=True)
+        b_size_grouped = grouped.agg(
+            loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
+            loss_var=pd.NamedAgg(
+                column="loss", aggfunc=lambda x: np.mean((x - self.mean) ** 2)
+            ),
+            sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
+        ).reset_index()
+        b_size_g_inv: np.array = 1 / b_size_grouped["batchsize"]
+        var_estimates = self.var_reg.predict(b_size_g_inv.to_numpy().reshape(-1, 1))
+        reduced_df = df.groupby("batchsize").head(100).reset_index(drop=True)
+        b_size_inv = 1 / reduced_df["batchsize"]
+        fig, axs = plt.subplots(3, 2)
         axs[1, 0].scatter(
             b_size_inv,
             (reduced_df["loss"] - self.mean) ** 2,
@@ -269,26 +272,23 @@ class IsotropicCovariance:
             alpha=0.3,
         )
         axs[1, 0].legend(loc="upper left")
-
-        # QQ-plot against chi^2
-        # for bs in b_size_selection:
-        stats.probplot(
-            (grouped.get_group(bs)["loss"] - self.mean) ** 2,
-            dist=stats.chi2(df=1),
-            plot=axs[1, 1],
-        )
-        for idx, line in enumerate(axs[1, 1].get_lines()):
-            # line.set_color(f"C{idx//2}")
-            if idx % 2 == 0:  # scatter
-                line.set_markersize(1)
-                line.set_label(f"b={bs}")
-            if idx % 2 == 1:
-                line.set_linestyle("--")
         axs[1, 1].set_title("")
         axs[1, 1].set_xlabel("")
         axs[1, 1].legend()
 
-        # ==== Plot Gradient Norms ====
+    def plot_gradient_norms(self, df):
+        grouped = df.groupby("batchsize", sort=True)
+        b_size_grouped = grouped.agg(
+            loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
+            loss_var=pd.NamedAgg(
+                column="loss", aggfunc=lambda x: np.mean((x - self.mean) ** 2)
+            ),
+            sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
+        ).reset_index()
+        b_size_g_inv: np.array = 1 / b_size_grouped["batchsize"]
+        reduced_df = df.groupby("batchsize").head(100).reset_index(drop=True)
+        b_size_inv = 1 / reduced_df["batchsize"]
+        fig, axs = plt.subplots(3, 2)
         axs[2, 0].set_xlabel("1/b")
         axs[2, 0].scatter(
             b_size_inv,
@@ -311,38 +311,18 @@ class IsotropicCovariance:
         axs[2, 0].fill_between(
             x=b_size_g_inv,
             y1=sq_norm_means
-            + (stats.chi2.ppf(0.025, dims) - dims) * sq_norm_means / dims,
+            + (stats.chi2.ppf(0.025, self.dims) - self.dims)
+            * sq_norm_means
+            / self.dims,
             y2=sq_norm_means
-            + (stats.chi2.ppf(0.975, dims) - dims) * sq_norm_means / dims,
+            + (stats.chi2.ppf(0.975, self.dims) - self.dims)
+            * sq_norm_means
+            / self.dims,
             alpha=0.3,
         )
-
         axs[2, 0].legend(loc="upper left")
-
-        # for bs in b_size_selection:
-        stats.probplot(
-            grouped.get_group(bs)["sq_grad_norm"],
-            dist=stats.chi2(df=dims),
-            plot=axs[2, 1],
-        )
-        for idx, line in enumerate(axs[2, 1].get_lines()):
-            # line.set_color(f"C{idx//2}")
-            if idx % 2 == 0:  # scatter
-                line.set_markersize(1)
-                line.set_label(f"b={bs}")
-            if idx % 2 == 1:
-                line.set_linestyle("--")
         axs[2, 1].set_title("")
         axs[2, 1].legend()
-
-        return (
-            (fig, axs),
-            {
-                "mean": self.mean,
-                "var_reg": self.var_reg,
-                "g_var_reg": self.g_var_reg,
-            },
-        )
 
     def auto_fit(
         self,
