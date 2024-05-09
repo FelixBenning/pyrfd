@@ -233,6 +233,8 @@ class IsotropicCovariance:
 
         plots.plot_gradient_norms(axs[2,0], df, g_var_reg=self.g_var_reg, dims=self.dims)
 
+        return (fig, axs)
+
 
     def auto_fit(
         self,
