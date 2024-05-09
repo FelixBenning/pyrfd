@@ -25,9 +25,13 @@ def plot_loss(ax, df: pd.DataFrame, *, mean, var_reg: LinearRegression):
 
     ### STATISTICAL PLOTS ###
 
-    grouped_df = df.groupby("batchsize", sort=True).agg(
-        loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
-    ).reset_index()
+    grouped_df = (
+        df.groupby("batchsize", sort=True)
+        .agg(
+            loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
+        )
+        .reset_index()
+    )
     b_size_inv: np.array = 1 / grouped_df["batchsize"]
 
     # batchwise mean
@@ -60,8 +64,30 @@ def plot_loss(ax, df: pd.DataFrame, *, mean, var_reg: LinearRegression):
     ax.set_xlabel("1/b")
 
 
+def qq_plot_losses(ax, df: pd.DataFrame, *, batch_sizes=None):
+    """QQ-Plot against the normal distribution of the Losses"""
+    if batch_sizes is None:  # select batch size with most data
+        bsize_counts = df["batchsize"].value_counts(sort=True, ascending=False)
+        batch_sizes = [bsize_counts.index[0]]
+
+    for batch_size in batch_sizes:
+        filtered_df = df.groupby("batchsize", sort=True).get_group(batch_size)
+        stats.probplot(filtered_df["loss"], dist="norm", plot=ax)
+        ax.get_lines()[-2].set_label(f"b={batch_size}")
+
+    for idx, line in enumerate(ax.get_lines()):
+        line.set_color(f"C{idx//2}")
+        if idx % 2 == 0:  # scatter
+            line.set_markersize(1)
+        if idx % 2 == 1:  # regression line
+            line.set_linestyle("--")
+
+    ax.set_xlabel("")
+    ax.legend()
+
+
 def plot_squared_losses(ax, df: pd.DataFrame, *, mean, var_reg):
-    """ Plot squared centered losses with variance and batch wise variance estimates and
+    """Plot squared centered losses with variance and batch wise variance estimates and
     95% - chi2 based confidence interval estimate
     """
     ### SCATTER PLOT ###
@@ -78,9 +104,15 @@ def plot_squared_losses(ax, df: pd.DataFrame, *, mean, var_reg):
 
     ### STATISTICAL PLOTS ###
 
-    grouped_df = df.groupby("batchsize", sort=True).agg(
-        loss_var=pd.NamedAgg(column="loss", aggfunc=lambda x: np.mean((x - mean) ** 2)),
-    ).reset_index()
+    grouped_df = (
+        df.groupby("batchsize", sort=True)
+        .agg(
+            loss_var=pd.NamedAgg(
+                column="loss", aggfunc=lambda x: np.mean((x - mean) ** 2)
+            ),
+        )
+        .reset_index()
+    )
     b_size_inv: np.array = 1 / grouped_df["batchsize"]
 
     # batchwise mean squares
@@ -114,8 +146,33 @@ def plot_squared_losses(ax, df: pd.DataFrame, *, mean, var_reg):
     ax.set_title("")
 
 
+def qq_plot_squared_losses(ax, df: pd.DataFrame, *, mean, batch_sizes=None):
+    """QQ-Plot of squared losses against chi2 distribution"""
+    if batch_sizes is None:  # select batch size with most data
+        bsize_counts = df["batchsize"].value_counts(sort=True, ascending=False)
+        batch_sizes = [bsize_counts.index[0]]
+
+    # QQ-plot against chi^2
+    for batch_size in batch_sizes:
+        filtered_df = df.groupby("batchsize", sort=True).get_group(batch_size)
+        sq_losses = (filtered_df["loss"] - mean) ** 2
+        stats.probplot(sq_losses, dist=stats.chi2(df=1), plot=ax)
+        ax.get_lines()[-2].set_label(f"b={batch_size}")
+
+    for idx, line in enumerate(ax.get_lines()):
+        line.set_color(f"C{idx//2}")
+        if idx % 2 == 0:  # scatter
+            line.set_markersize(1)
+        if idx % 2 == 1:  # regression line
+            line.set_linestyle("--")
+
+    ax.set_title("")
+    ax.set_xlabel("")
+    ax.legend()
+
+
 def plot_gradient_norms(ax, df: pd.DataFrame, *, g_var_reg: LinearRegression, dims):
-    """ Plot gradient norms, mean and batch wise means and 95% confidence interval
+    """Plot gradient norms, mean and batch wise means and 95% confidence interval
     based on sums of squared Gaussian i.e. chi2(dims) assumption
     """
     ### SCATTER PLOT ###
@@ -132,9 +189,13 @@ def plot_gradient_norms(ax, df: pd.DataFrame, *, g_var_reg: LinearRegression, di
 
     ### STATISTICAL PLOTS ###
 
-    grouped_df = df.groupby("batchsize", sort=True).agg(
-        sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
-    ).reset_index()
+    grouped_df = (
+        df.groupby("batchsize", sort=True)
+        .agg(
+            sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
+        )
+        .reset_index()
+    )
     b_size_inv: np.array = 1 / grouped_df["batchsize"]
 
     # batch wise mean of squared gradient norms
@@ -164,3 +225,32 @@ def plot_gradient_norms(ax, df: pd.DataFrame, *, g_var_reg: LinearRegression, di
     ### META INFORMATION ###
     ax.legend(loc="upper left")
     ax.set_xlabel("1/b")
+
+
+def qq_plot_sq_gradient_norms(ax, df: pd.DataFrame, *, dims, batch_sizes=None):
+    """QQ-Plot of squared gradient norms against chi2(dims) distribution"""
+
+    if batch_sizes is None:  # select batch size with most data
+        bsize_counts = df["batchsize"].value_counts(sort=True, ascending=False)
+        batch_sizes = [bsize_counts.index[0]]
+
+    # QQ-plot against chi^2
+    for batch_size in batch_sizes:
+        filtered_df = df.groupby("batchsize", sort=True).get_group(batch_size)
+        stats.probplot(
+            filtered_df["sq_grad_norm"],
+            dist=stats.chi2(df=dims),
+            plot=ax,
+        )
+        ax.get_lines()[-2].set_label(f"b={batch_size}")
+
+    for idx, line in enumerate(ax.get_lines()):
+        line.set_color(f"C{idx//2}")
+        if idx % 2 == 0:  # scatter
+            line.set_markersize(1)
+        if idx % 2 == 1:  # regression line
+            line.set_linestyle("--")
+
+    ax.set_title("")
+    ax.set_xlabel("")
+    ax.legend()

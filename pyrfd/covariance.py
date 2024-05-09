@@ -238,8 +238,15 @@ class IsotropicCovariance:
         axs[1, 0].set_xlabel("")
 
         plots.plot_gradient_norms(
-            axs[2, 0], df, g_var_reg=self.g_var_reg, dims=self.dims
+            axs[2, 0],
+            df,
+            g_var_reg=self.g_var_reg,
+            dims=self.dims,
         )
+
+        plots.qq_plot_losses(axs[0, 1], df)
+        plots.qq_plot_squared_losses(axs[1, 1], df, mean=self.mean)
+        plots.qq_plot_sq_gradient_norms(axs[2, 1], df, dims=self.dims)
 
         return (fig, axs)
 
