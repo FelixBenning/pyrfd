@@ -10,7 +10,7 @@ import torch
 from tqdm import tqdm
 
 
-def _budget(bsize_counts):
+def budget_use(bsize_counts):
     return sum(bsize * count for bsize, count in bsize_counts.items())
 
 
@@ -83,7 +83,7 @@ class IsotropicSampler:
     ):
         """sample the batchsize counts and append them to the cached samples
         (which are used as a context manager to allow for KeyboardInterupt)"""
-        budget = _budget(bsize_counts)
+        budget = budget_use(bsize_counts)
         with append_to as records:
             with tqdm(
                 total=budget,

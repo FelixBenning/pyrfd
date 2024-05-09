@@ -19,10 +19,10 @@ from .batchsize import (
     DEFAULT_VAR_REG,
     batchsize_counts,
     empirical_intercept_variance,
-    limit_intercept_variance,
+    theoretical_intercept_variance,
 )
 
-from .sampling import CachedSamples, IsotropicSampler, _budget
+from .sampling import CachedSamples, IsotropicSampler, budget_use
 
 
 def selection(sorted_list, num_elts):
@@ -373,7 +373,7 @@ class IsotropicCovariance:
             if len(cached_samples) > 0:
                 bsize_counts = samples["batchsize"].value_counts()
 
-            total_samples = _budget(bsize_counts)
+            total_samples = budget_use(bsize_counts)
             if total_samples >= initial_budget:
                 self.fit(samples, dims)
 
@@ -402,7 +402,7 @@ class IsotropicCovariance:
                     values=(bsize_counts.index, bsize_counts / sum(bsize_counts))
                 )
                 lim_sdv = (
-                    np.sqrt(limit_intercept_variance(dist, self.var_reg)) / var_mean
+                    np.sqrt(theoretical_intercept_variance(dist, self.var_reg)) / var_mean
                 )
                 # need: lim_sdv/sqrt(budget) < tol
                 pred_necessary_budget = (lim_sdv / tol) ** 2
@@ -436,12 +436,12 @@ class IsotropicCovariance:
                 self.var_reg,
                 bsize_counts,
             )
-            budget_use = sampler.sample(
+            used_budget = sampler.sample(
                 needed_bsize_counts,
                 append_to=cached_samples,
             )
             if outer_pgb:
-                outer_pgb.update(budget_use)
+                outer_pgb.update(used_budget)
         if outer_pgb:
             outer_pgb.close()
 

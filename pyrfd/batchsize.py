@@ -10,7 +10,7 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 from tqdm import tqdm
 
-from .sampling import _budget
+from .sampling import budget_use
 
 # "arbitrary" design
 DEFAULT_VAR_REG = LinearRegression()
@@ -40,18 +40,19 @@ def empirical_intercept_variance(counts, var_reg):
     return w_2nd_mom / (n * (theta * w_2nd_mom - w_1st_mom**2))
 
 
-def limit_intercept_variance(dist: stats.rv_discrete, var_reg):
-    """limiting variance as sample budget grows to infinity, this assumes the
-    number of batch size samples n is related to the buget in the following way:
+def theoretical_intercept_variance(dist: stats.rv_discrete, var_reg):
+    """ the number of batch size samples n is related to the buget in the
+    following way:
         n E[B] < budget
     where B is the random batch size sampled from dist. Thus n = budget/E[B],
-    and we can replace 1/n by E[B]/budget in the formula. Since we let budget to
-    infinity, we remove the budget to get an asymptotic/convergent formulation.
+    and we can replace 1/n by E[B]/budget in the formula. Since we the budget
+    is then just a constant factor we remove this dependency which has no influence
+    on minimization.
     """
-    theta = dist.expect(func=lambda x: 1 / sq_error_var(var_reg, x))
+    z_B_var = dist.expect(func=lambda x: 1 / sq_error_var(var_reg, x))
     w_1st_mom = dist.expect(func=lambda x: 1 / (sq_error_var(var_reg, x) * x))
     w_2nd_mom = dist.expect(func=lambda x: 1 / (sq_error_var(var_reg, x) * (x**2)))
-    return (dist.mean() * w_2nd_mom) / (theta * w_2nd_mom - w_1st_mom**2)
+    return (dist.mean() * w_2nd_mom) / (z_B_var * w_2nd_mom - w_1st_mom**2)
 
 
 def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):
@@ -98,13 +99,12 @@ def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):
             )
 
     else:
-
         def callback(_):
             pass
 
     start = time()
     res = optimize.minimize(
-        lambda log_w: limit_intercept_variance(gibbs_dist(np.exp(log_w)), var_reg),
+        lambda log_w: theoretical_intercept_variance(gibbs_dist(np.exp(log_w)), var_reg),
         np.log(weights),
         method="Nelder-Mead",
         callback=callback,
@@ -132,7 +132,7 @@ def batchsize_counts(
 
     return a series with counts of batchsizes (where the batchsizes are the index).
     """
-    spent_budget = _budget(existing_b_size_samples)
+    spent_budget = budget_use(existing_b_size_samples)
     total = spent_budget + budget
     optimal_dist: stats.rv_discrete = batchsize_dist(var_reg)
 
