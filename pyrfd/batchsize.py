@@ -49,10 +49,10 @@ def theoretical_intercept_variance(dist: stats.rv_discrete, var_reg):
     is then just a constant factor we remove this dependency which has no influence
     on minimization.
     """
-    z_B_var = dist.expect(func=lambda x: 1 / sq_error_var(var_reg, x))
+    z_b_var = dist.expect(func=lambda x: 1 / sq_error_var(var_reg, x))
     w_1st_mom = dist.expect(func=lambda x: 1 / (sq_error_var(var_reg, x) * x))
     w_2nd_mom = dist.expect(func=lambda x: 1 / (sq_error_var(var_reg, x) * (x**2)))
-    return (dist.mean() * w_2nd_mom) / (z_B_var * w_2nd_mom - w_1st_mom**2)
+    return (dist.mean() * w_2nd_mom) / (z_b_var * w_2nd_mom - w_1st_mom**2)
 
 
 def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):

@@ -2,16 +2,19 @@
 Module for sampling the loss at different batch sizes for covariance estimation.
 """
 
+from __future__ import annotations
+
 import time
 from pathlib import Path
+from logging import warning
 
 import pandas as pd
 import torch
 from tqdm import tqdm
-from logging import warning
 
 
 def budget_use(bsize_counts):
+    """calculate the used budget from b_size counts"""
     return sum(bsize * count for bsize, count in bsize_counts.items())
 
 
@@ -55,6 +58,7 @@ class CachedSamples:
             pd.DataFrame(self.records).to_csv(self.filename, index=False)
 
 
+# pylint: disable=too-few-public-methods
 class IsotropicSampler:
     """Sampling the loss function under the isotropy assumption (i.e. randomly
     samples inputs and does not treat them differently)"""

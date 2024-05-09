@@ -1,13 +1,14 @@
+""" Provide plotting functions for sanity check plots """
+
 import pandas as pd
 import numpy as np
 from scipy import stats
-import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 
 
 def plot_loss(ax, df: pd.DataFrame, *, mean, var_reg: LinearRegression):
     """
-    Plot Losses with mean, batch wise mean and variance based 95%-confidence interval 
+    Plot Losses with mean, batch wise mean and variance based 95%-confidence interval
     under the Gaussian assumption.
     """
     ### SCATTER PLOT ###
@@ -57,7 +58,6 @@ def plot_loss(ax, df: pd.DataFrame, *, mean, var_reg: LinearRegression):
 
     ax.legend(loc="upper left")
     ax.set_xlabel("1/b")
-
 
 
 def plot_squared_losses(ax, df: pd.DataFrame, *, mean, var_reg):

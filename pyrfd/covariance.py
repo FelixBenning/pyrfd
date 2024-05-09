@@ -15,7 +15,7 @@ import torch
 from scipy import stats
 from tqdm import tqdm
 
-from  . import plots
+from . import plots
 
 from .batchsize import (
     batchsize_counts,
@@ -150,8 +150,10 @@ class IsotropicCovariance:
 
     __slots__ = "mean", "var_reg", "g_var_reg", "dims", "fitted"
 
+    # pylint: disable=too-many-arguments
     def __init__(
         self,
+        *,
         mean=None,
         var_reg=None,
         g_var_reg=None,
@@ -183,8 +185,11 @@ class IsotropicCovariance:
     def asymptotic_learning_rate(self, b_size_inverse=0, limiting_loss=0):
         """asymptotic learning rate of RFD
 
-        b_size_inverse: The inverse 1/b of the batch size b for which the learning rate is used (default is 0)
-        limiting_loss: The loss at the end of optimization (default is 0)
+        b_size_inverse:
+            The inverse 1/b of the batch size b for which the learning rate is used
+            (default is 0)
+        limiting_loss:
+            The loss at the end of optimization (default is 0)
         """
         assert self.fitted, "The covariance has not been fitted yet."
         assert (
@@ -220,27 +225,31 @@ class IsotropicCovariance:
         self.fitted = True
 
         return self
-    
+
     def plot_sanity_checks(self, df: pd.DataFrame):
+        """Plot Sanity Check Plots"""
         fig, axs = plt.subplots(3, 2)
 
-        plots.plot_loss(axs[0,0], df, mean=self.mean, var_reg=self.var_reg)
-        axs[0,0].set_xscale("log")
-        axs[0,0].set_xlabel("")
+        plots.plot_loss(axs[0, 0], df, mean=self.mean, var_reg=self.var_reg)
+        axs[0, 0].set_xscale("log")
+        axs[0, 0].set_xlabel("")
 
-        plots.plot_squared_losses(axs[1,0], df, mean=self.mean, var_reg=self.var_reg)
-        axs[1,0].set_xlabel("")
+        plots.plot_squared_losses(axs[1, 0], df, mean=self.mean, var_reg=self.var_reg)
+        axs[1, 0].set_xlabel("")
 
-        plots.plot_gradient_norms(axs[2,0], df, g_var_reg=self.g_var_reg, dims=self.dims)
+        plots.plot_gradient_norms(
+            axs[2, 0], df, g_var_reg=self.g_var_reg, dims=self.dims
+        )
 
         return (fig, axs)
 
-
+    # pylint: disable=too-many-arguments
     def auto_fit(
         self,
         model_factory,
         loss,
         data,
+        *,
         cache=None,
         tol=0.4,
         initial_budget=6000,
