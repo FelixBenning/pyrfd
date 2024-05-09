@@ -275,7 +275,7 @@ class IsotropicCovariance:
         different batch size parameters such that it returns (x,y) tuples when
         iterated on
         """
-        dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
+        self.dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
         print(f"\n\nAutomatically fitting Covariance Model: {repr(self)}")
 
         cached_samples = CachedSamples(cache)
@@ -293,17 +293,16 @@ class IsotropicCovariance:
 
             total_samples = budget_use(bsize_counts)
             if total_samples >= initial_budget:
-                self.fit(samples, dims)
+                self.fit(samples, self.dims)
 
-            var_mean = self.var_reg.intercept_
-            if var_mean <= 0:
+            if self.var_reg and self.var_reg.intercept_ <= 0:
                 # negative variance est -> reset
                 self.fitted = False
                 self.var_reg = None
 
             if self.fitted:
                 var_var = empirical_intercept_variance(bsize_counts, self.var_reg)
-                rel_error = np.sqrt(var_var) / var_mean
+                rel_error = np.sqrt(var_var) / self.var_reg.intercept_
                 tqdm.write(f"\nCheckpoint {idx}:")
                 tqdm.write(
                     "-----------------------------------------------------------"
@@ -321,7 +320,7 @@ class IsotropicCovariance:
                 )
                 lim_sdv = (
                     np.sqrt(theoretical_intercept_variance(dist, self.var_reg))
-                    / var_mean
+                    / self.var_reg.intercept_
                 )
                 # need: lim_sdv/sqrt(budget) < tol
                 pred_necessary_budget = (lim_sdv / tol) ** 2

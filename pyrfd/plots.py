@@ -182,13 +182,14 @@ def plot_gradient_norms(ax, df: pd.DataFrame, *, g_var_reg: LinearRegression, di
 
     ax.scatter(
         1 / reduced_df["batchsize"],
-        reduced_df["sq_grad_norm"],
+        reduced_df["grad_norm"] ** 2,
         s=1,  # marker size
         label=r"$\|\nabla\mathcal{L}_b(w)\|^2$",
     )
 
     ### STATISTICAL PLOTS ###
 
+    df["sq_grad_norm"] = df["grad_norm"] ** 2
     grouped_df = (
         df.groupby("batchsize", sort=True)
         .agg(
@@ -234,6 +235,7 @@ def qq_plot_sq_gradient_norms(ax, df: pd.DataFrame, *, dims, batch_sizes=None):
         bsize_counts = df["batchsize"].value_counts(sort=True, ascending=False)
         batch_sizes = [bsize_counts.index[0]]
 
+    df["sq_grad_norm"] = df["grad_norm"] ** 2
     # QQ-plot against chi^2
     for batch_size in batch_sizes:
         filtered_df = df.groupby("batchsize", sort=True).get_group(batch_size)

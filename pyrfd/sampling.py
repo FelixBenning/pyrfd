@@ -34,11 +34,11 @@ class CachedSamples:
             )
             self.records = []
         else:
+            print(
+                "Tip: You can cancel sampling at any time, samples will be saved in the cache."
+            )
             try:
                 self.records = pd.read_csv(filename).to_dict("records")
-                print(
-                    "Tip: You can cancel sampling at any time, samples will be saved in the cache."
-                )
             except FileNotFoundError:
                 self.records = []
 
@@ -91,10 +91,13 @@ class IsotropicSampler:
     def sample(
         self,
         bsize_counts: pd.Series,
-        append_to: CachedSamples = CachedSamples(),
+        append_to: CachedSamples = None,
     ):
         """sample the batchsize counts and append them to the cached samples
         (which are used as a context manager to allow for KeyboardInterupt)"""
+        if append_to is None:
+            append_to = CachedSamples()
+
         budget = budget_use(bsize_counts)
         with append_to as records:
             with tqdm(

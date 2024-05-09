@@ -12,11 +12,6 @@ from tqdm import tqdm
 
 from .sampling import budget_use
 
-# "arbitrary" design
-DEFAULT_VAR_REG = LinearRegression()
-DEFAULT_VAR_REG.intercept_ = 0.05  # should be greater zero - cf. sampling
-DEFAULT_VAR_REG.coef_ = np.array([1])
-
 CUTOFF = 20  # no batch-sizes below
 
 
@@ -55,7 +50,7 @@ def theoretical_intercept_variance(dist: stats.rv_discrete, var_reg):
     return (dist.mean() * w_2nd_mom) / (z_b_var * w_2nd_mom - w_1st_mom**2)
 
 
-def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):
+def batchsize_dist(var_reg=None, logging=False):
     """Find the optimal batch size distribution (in a Gibbs distribution class)
     under the assumption that the variance regression var_reg is true. The Gibbs
     distribution class is of the form
@@ -64,6 +59,12 @@ def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):
 
     and optimized over `w`
     """
+    if var_reg is None:
+        # DEFAULT_VAR_REG
+        var_reg = LinearRegression()
+        var_reg.intercept_ = 0.05  # should be greater zero - cf. sampling
+        var_reg.coef_ = np.array([1])
+
     beta_0 = var_reg.intercept_
     beta_1 = var_reg.coef_[0]
     if beta_0 <= 0:
@@ -86,8 +87,8 @@ def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):
     # solution for DEFAULT_VAR_REG
     weights = np.array([1.78032054e-16, 1.53346666e-02])
 
-    # early return
-    if var_reg == DEFAULT_VAR_REG:
+    # early return due to DEFAULT_VAR_REG
+    if var_reg.intercept_ == 0.05 and var_reg.coef_[0] == 1:
         return gibbs_dist(weights)
 
     if logging:
@@ -122,7 +123,7 @@ def batchsize_dist(var_reg=DEFAULT_VAR_REG, logging=False):
 
 
 def batchsize_counts(
-    budget, var_reg=DEFAULT_VAR_REG, existing_b_size_samples: pd.Series = pd.Series()
+    budget, var_reg=None, existing_b_size_samples: pd.Series = pd.Series()
 ):
     """Determines the optimal batchsize distribution (in a Gibbs distribution class),
     then adjusts the distribution for existing batchsize samples. (i.e. sample fewer
