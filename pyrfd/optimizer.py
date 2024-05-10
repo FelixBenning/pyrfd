@@ -15,8 +15,15 @@ class RFD(Optimizer):
     to the statistically determined step size (i.e. default `1`)
     """
 
-    def __init__(self, params, *, covariance_model: IsotropicCovariance, momentum=0, lr=1):
-        defaults = {"cov": covariance_model, "momentum": momentum, "lr": lr}
+    def __init__(
+        self, params, *, covariance_model: IsotropicCovariance, momentum=0, lr=1
+    ):
+        defaults = {
+            "cov": covariance_model,
+            "momentum": momentum,
+            "lr": lr,  # really a learning rate multiplier, but this name ensures compatibility with schedulers
+            "learning_rate": None,
+        }
         super().__init__(params, defaults)
 
     def step(self, closure):  # pylint: disable=locally-disabled, signature-differs
@@ -48,6 +55,7 @@ class RFD(Optimizer):
 
                 cov_model: IsotropicCovariance = group["cov"]
                 learning_rate = lr * cov_model.learning_rate(loss, grad_norm)
+                group["learning_rate"] = learning_rate
 
                 for param in group["params"]:
                     state = self.state[param]
@@ -60,7 +68,8 @@ class RFD(Optimizer):
                         else:
                             velocity = torch.mul(param.grad, -1)
 
-                        param += learning_rate * velocity  # add velocity to parameters in-place!
+                        # add velocity to parameters in-place!
+                        param += learning_rate * velocity
                         state["velocity"] = velocity
 
         return loss

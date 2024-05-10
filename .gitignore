@@ -161,3 +161,8 @@ cython_debug/
 
 # Apple junk
 .DS_Store
+
+
+# Caches
+cache/*
+lightning_logs/*

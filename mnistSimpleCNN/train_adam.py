@@ -1,4 +1,8 @@
-from torch import optim, nn
+from __future__ import annotations
+from typing import Callable, Any
+from lightning.pytorch.core.optimizer import LightningOptimizer
+import torch
+from torch import optim
 from torch.utils.data import DataLoader
 import torchvision as tv
 import torch.nn.functional as F
@@ -8,45 +12,65 @@ import torchmetrics.functional.classification as metrics
 from mnistSimpleCNN.models.modelM3 import ModelM3
 
 
-class ClassicOptimizerTraining(L.LightningModule):
-    def __init__(self, model, optimizer=optim.Adam, loss=F.nll_loss):
+class Classifier(L.LightningModule):
+    def __init__(self, model, optimizer=optim.Adam):
         super().__init__()
         self.optimizer = optimizer
         self.model = model
-        self.loss = loss
-        self.automatic_optimization = False
 
     def training_step(self, batch, batch_idx):
-        input, target = batch
-        prediction = self.model(input)
-        loss_value = self.loss(prediction, target)
-        self.log("train_loss", loss_value)
-        # acc = metrics.multilabel_accuracy(prediction, target)
-        # self.log("train_accuracy", acc, on_epoch=True)
+        x_in, y_out = batch
+        prediction: torch.Tensor = self.model(x_in)
+        loss_value = F.nll_loss(prediction, y_out)
+        self.log("train_loss", loss_value, prog_bar=True)
+        acc = metrics.multiclass_accuracy(prediction, y_out, prediction.size(dim=1))
+        self.log("train_accuracy", acc, on_epoch=True)
         return loss_value
-    
+
     def test_step(self, batch):
-        input, target = batch
-        prediction = self.model(input)
-        loss_value = self.loss(prediction, target)
+        x_in, y_out = batch
+        prediction: torch.Tensor = self.model(x_in)
+        loss_value = F.nll_loss(prediction, y_out)
         self.log("test_loss", loss_value, on_step=True, on_epoch=True)
 
-        # acc = metrics.multilabel_accuracy(prediction, target)
-        # self.log("test_accuracy", acc, on_epoch=True)
+        acc = metrics.multiclass_accuracy(prediction, y_out, prediction.size(dim=1))
+        self.log("test_accuracy", acc, on_epoch=True)
 
-        # rec = metrics.multilabel_recall(prediction, target)
-        # self.log("test_recall", rec, on_epoch=True)
-        
-        # prec = metrics.multilabel_precision(prediction, target)
-        # self.log("test_precision", prec, on_epoch=True)
+        rec = metrics.multiclass_recall(prediction, y_out, prediction.size(dim=1))
+        self.log("test_recall", rec, on_epoch=True)
+
+        prec = metrics.multiclass_precision(prediction, y_out, prediction.size(dim=1))
+        self.log("test_precision", prec, on_epoch=True)
 
     def configure_optimizers(self):
-        optim = self.optimizer(self.parameters())
-        return optim
+        return self.optimizer(self.parameters())
+
+    def optimizer_step(
+        self,
+        epoch: int,
+        batch_idx: int,
+        optimizer: optim.Optimizer | LightningOptimizer,
+        optimizer_closure: Callable[[], Any] | None = None,
+    ) -> None:
+        # do the default optimizer step
+        optimizer.step(closure=optimizer_closure)
+
+        # log the learning rate
+        if len(optimizer.param_groups) <= 1:
+            pg = optimizer.param_groups[0]
+            learning_rate = pg.get("learning_rate", pg["lr"])
+            self.log("learning_rate", learning_rate)
+        else:
+            for (idx, pg) in enumerate(optimizer.param_groups):
+                learning_rate = pg.get("learning_rate", pg["lr"])
+                self.log(f"learning_rate_{idx}", learning_rate, on_step=True)
 
 
 def run():
-    trainer = L.Trainer(max_epochs=2)
+    trainer = L.Trainer(
+        max_epochs=2,
+        log_every_n_steps=1,
+    )
 
     train_loader = DataLoader(
         tv.datasets.MNIST(
@@ -67,9 +91,10 @@ def run():
         shuffle=False,
     )
 
-    model = ClassicOptimizerTraining(ModelM3())
+    model = Classifier(ModelM3())
     trainer.fit(model=model, train_dataloaders=train_loader)
     trainer.test(model=model, dataloaders=test_loader)
+
 
 if __name__ == "__main__":
     run()
