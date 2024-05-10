@@ -1,7 +1,17 @@
 import os
 import argparse
 from mnistSimpleCNN.train import run
-from pyrfd import RFD
+from pyrfd import RFD, sampling,  covariance
+
+# cached_samples = sampling.CachedSamples("cache/CNN3_mnist.csv")
+# cov_model = covariance.SquaredExponential()
+# cov_model.auto_fit(
+
+# )
+
+# def rfd_factory(params):
+#     RFD(params, covariance_model=cov_model)
+
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
@@ -16,7 +26,7 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     for i in range(args.trials):
         run(
-            RFD,
+            # RFD,
             p_seed=args.seed + i,
             p_epochs=args.epochs,
             p_kernel_size=args.kernel_size,
