@@ -21,7 +21,8 @@ class RFD(Optimizer):
         defaults = {
             "cov": covariance_model,
             "momentum": momentum,
-            "lr": lr,  # really a learning rate multiplier, but this name ensures compatibility with schedulers
+            "lr": lr,  # really a learning rate multiplier,
+            # but this name ensures compatibility with schedulers
             "learning_rate": None,
         }
         super().__init__(params, defaults)

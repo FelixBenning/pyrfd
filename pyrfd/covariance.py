@@ -178,7 +178,7 @@ class IsotropicCovariance:
         )
 
     @abstractmethod
-    def learning_rate(self, loss, grad_norm):
+    def learning_rate(self, loss, grad_norm, b_size_inverse=0):
         """learning rate of this covariance model from the RFD paper"""
         return NotImplemented
 
@@ -390,11 +390,16 @@ class SquaredExponential(IsotropicCovariance):
             "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
         )
 
-    def learning_rate(self, loss, grad_norm):
+    def learning_rate(self, loss, grad_norm, b_size_inverse=0):
         """RFD learning rate from Random Function Descent paper"""
-        tmp = (self.mean - loss) / 2
-        return (self.scale**2) / (
-            torch.sqrt(tmp**2 + (self.scale * grad_norm) ** 2) + tmp
+
+        # C(0)/(C(0) + 1/b * C_eps(0))
+        var_adjust = self.var_reg.intercept_/self.var_reg.predict(b_size_inverse)
+        var_g_adjust = self.g_var_reg.intercept_/self.g_var_reg.predict(b_size_inverse)
+
+        tmp = var_adjust * (self.mean - loss) / 2
+        return var_g_adjust * (self.scale**2) / (
+            torch.sqrt(tmp**2 + (self.scale * grad_norm * var_g_adjust) ** 2) + tmp
         )
 
 
