@@ -5,13 +5,17 @@ from typing import Callable, Any
 
 import functools as func
 
+import lightning as L
 from lightning.pytorch.core.optimizer import LightningOptimizer
+from lightning.pytorch.loggers import TensorBoardLogger
+
+import wandb
+
 import torch
 from torch import optim
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import torchvision as tv
-import lightning as L
 import torchmetrics.functional.classification as metrics
 
 from mnistSimpleCNN.models.modelM3 import ModelM3
@@ -74,6 +78,7 @@ class Classifier(L.LightningModule):
                 self.log(f"learning_rate_{idx}", learning_rate, on_step=True)
 
 
+
 def mnist_training():
 
     train_dataset = tv.datasets.MNIST(
@@ -116,7 +121,9 @@ def mnist_training():
             trainer = L.Trainer(
                 max_epochs=2,
                 log_every_n_steps=1,
-                default_root_dir=f"logs/mnist/{model.__name__}/{name}"
+                logger= TensorBoardLogger(
+                    f"logs/mnist/{model.__name__}", name=name
+                )
             )
             classifier = Classifier(model(), optimizer=opt)
             classifiers[name] = classifier

@@ -34,9 +34,6 @@ class CachedSamples:
             )
             self.records = []
         else:
-            print(
-                "Tip: You can cancel sampling at any time, samples will be saved in the cache."
-            )
             try:
                 self.records = pd.read_csv(filename).to_dict("records")
             except FileNotFoundError:

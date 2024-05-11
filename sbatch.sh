@@ -6,4 +6,4 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem-per-cpu=20gb
 
-poetry run python mnistSimpleCNN/mnist_training.py
+poetry run python benchmarking/classification
