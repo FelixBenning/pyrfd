@@ -36,7 +36,7 @@ class MNIST(L.LightningDataModule):
         if stage == "fit":
             mnist_full = MNISTDataset(self.data_dir, train=True, transform=self.transform)
             self.train_data, self.validation_data = random_split(
-                mnist_full, [55000, 5000], generator=torch.Generator().manual_seed(42)
+                mnist_full, [0.8, 0.2], generator=torch.Generator().manual_seed(42)
             )
 
         # Assign test dataset for use in dataloader(s)
@@ -91,7 +91,7 @@ class FashionMNIST(L.LightningDataModule):
         if stage == "fit":
             mnist_full = FashionMNISTDataset(self.data_dir, train=True, transform=self.transform)
             self.train_data, self.validation_data = random_split(
-                mnist_full, [55000, 5000], generator=torch.Generator().manual_seed(42)
+                mnist_full, [0.8, 0.2], generator=torch.Generator().manual_seed(42)
             )
 
         # Assign test dataset for use in dataloader(s)

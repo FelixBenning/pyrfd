@@ -26,7 +26,6 @@ black = "^24.2.0"
 matplotlib = "^3.8.3"
 pylint = "^3.1.0"
 flake8 = "^7.0.0"
-wandb = "^0.17.0"
 
 [build-system]
 requires = ["poetry-core"]

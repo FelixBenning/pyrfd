@@ -19,7 +19,8 @@ class Classifier(L.LightningModule):
         self.optimizer = optimizer
         self.model = model
         self.hyperparemeters = hyperameters
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["model", "optimizer", "covariance_model"])
+
 
     # pylint: disable=arguments-differ
     def training_step(self, batch, *args, **kwargs):

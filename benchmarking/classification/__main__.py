@@ -18,7 +18,6 @@ from pyrfd import RFD, covariance
 
 def train_classic(
     problem,
-    trainer: L.Trainer,
     opt: optim.Optimizer,
     hyperparameters: Dict[str, Any],
 ):
@@ -27,20 +26,12 @@ def train_classic(
     data: L.LightningDataModule = problem["dataset"](batch_size=problem["batch_size"])
     classifier = Classifier(problem["model"](), optimizer=opt, **hyperparameters)
 
-    # wandb.init(
-    #     project="pyrfd",
-    #     config={
-    #         "dataset": problem["dataset"].__name__,
-    #         "model": problem["model"].__name__,
-    #         "batch_size": problem["batch_size"],
-    #         "optimizer": opt.__name__,
-    #         "hyperparameters": hyperparameters,
-    #     },
-    # )
+    trainer = trainer_from_problem(problem, opt_name=opt.__name__)
     trainer.fit(classifier, data)
+    trainer.test(classifier, data)
 
 
-def train_rfd(problem, trainer: L.Trainer, cov_string, covariance_model):
+def train_rfd(problem, cov_string, covariance_model):
     """Train a Classifier with RFD"""
     data: L.LightningDataModule = problem["dataset"](batch_size=problem["batch_size"])
     data.prepare_data()
@@ -57,17 +48,24 @@ def train_rfd(problem, trainer: L.Trainer, cov_string, covariance_model):
         problem["model"](), optimizer=RFD, covariance_model=covariance_model
     )
 
-    # wandb.init(
-    #     project="pyrfd",
-    #     config={
-    #         "dataset": problem["dataset"].__name__,
-    #         "model": problem["model"].__name__,
-    #         "batch_size": problem["batch_size"],
-    #         "optimizer": "RFD",
-    #         "covariance": cov_string,
-    #     },
-    # )
+    trainer = trainer_from_problem(problem, opt_name=f"RFD({cov_string})")
     trainer.fit(classifier, data)
+    trainer.test(classifier, data)
+
+
+def trainer_from_problem(problem, opt_name):
+    problem_id = f"{problem['dataset'].__name__}_{problem['model'].__name__}_{problem['batch_size']}"
+
+    tlogger = TensorBoardLogger("logs/TensorBoard", name=problem_id + opt_name)
+    csvlogger = CSVLogger("logs", name=problem_id + opt_name)
+
+    tlogger.log_hyperparams(params={"batch_size": problem["batch_size"]})
+    csvlogger.log_hyperparams(params={"batch_size": problem["batch_size"]})
+    return L.Trainer(
+        max_epochs=2,
+        log_every_n_steps=1,
+        logger=[tlogger, csvlogger],
+    )
 
 
 def main():
@@ -77,29 +75,14 @@ def main():
         "batch_size": 100,
     }
 
-    problem_id = f"{problem['dataset'].__name__}_{problem['model'].__name__}_{problem['batch_size']}"
-
-    tlogger = TensorBoardLogger("logs", name=problem_id)
-    csvlogger = CSVLogger("logs", name=problem_id)
-
-    tlogger.log_hyperparams(params={"batch_size": problem["batch_size"]})
-    csvlogger.log_hyperparams(params={"batch_size": problem["batch_size"]})
-    trainer = L.Trainer(
-        max_epochs=2,
-        log_every_n_steps=1,
-        logger=[tlogger, csvlogger],
-    )
-
     train_rfd(
         problem,
-        trainer,
         cov_string="SquaredExponential",
         covariance_model=covariance.SquaredExponential(),
     )
 
     train_classic(
         problem,
-        trainer,
         opt=optim.SGD,
         hyperparameters={
             "lr": 1e-3,
@@ -109,7 +92,6 @@ def main():
 
     train_classic(
         problem,
-        trainer,
         opt=optim.Adam,
         hyperparameters={
             "lr": 1e-3,
