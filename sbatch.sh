@@ -2,7 +2,8 @@
 
 #SBATCH --partition single 
 #SBATCH --ntasks=1
-#SBATCH --time=00:02:00
+#SBATCH --time=00:20:00
 #SBATCH --gres=gpu:1
+#SBATCH --mem-per-cpu=20gb
 
-poetry run python test.py
+poetry run python mnistSimpleCNN/mnist_training.py

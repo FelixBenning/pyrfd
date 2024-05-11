@@ -17,6 +17,7 @@ pandas = "^2.2.0"
 matplotlib = "^3.8.3"
 lightning = "^2.2.4"
 torchmetrics = "^1.4.0"
+tensorboard = "^2.16.2"
 
 
 [tool.poetry.group.dev.dependencies]

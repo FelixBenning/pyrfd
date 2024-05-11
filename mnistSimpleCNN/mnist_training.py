@@ -1,15 +1,23 @@
+""" Train MNIST """
+
 from __future__ import annotations
 from typing import Callable, Any
+
+import functools as func
+
 from lightning.pytorch.core.optimizer import LightningOptimizer
 import torch
 from torch import optim
 from torch.utils.data import DataLoader
-import torchvision as tv
 import torch.nn.functional as F
+import torchvision as tv
 import lightning as L
 import torchmetrics.functional.classification as metrics
 
 from mnistSimpleCNN.models.modelM3 import ModelM3
+from mnistSimpleCNN.models.modelM5 import ModelM5
+from mnistSimpleCNN.models.modelM7 import ModelM7
+from pyrfd import RFD, covariance
 
 
 class Classifier(L.LightningModule):
@@ -18,7 +26,7 @@ class Classifier(L.LightningModule):
         self.optimizer = optimizer
         self.model = model
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, *args, **kwargs):
         x_in, y_out = batch
         prediction: torch.Tensor = self.model(x_in)
         loss_value = F.nll_loss(prediction, y_out)
@@ -66,21 +74,19 @@ class Classifier(L.LightningModule):
                 self.log(f"learning_rate_{idx}", learning_rate, on_step=True)
 
 
-def run():
-    trainer = L.Trainer(
-        max_epochs=2,
-        log_every_n_steps=1,
-    )
+def mnist_training():
 
+    train_dataset = tv.datasets.MNIST(
+        root="mnistSimpleCNN/data",
+        train=True,
+        transform=tv.transforms.ToTensor(),
+    )
     train_loader = DataLoader(
-        tv.datasets.MNIST(
-            root="mnistSimpleCNN/data",
-            train=True,
-            transform=tv.transforms.ToTensor(),
-        ),
+        train_dataset,
         batch_size=120,
         shuffle=True,
     )
+
     test_loader = DataLoader(
         tv.datasets.MNIST(
             root="mnistSimpleCNN/data",
@@ -91,10 +97,32 @@ def run():
         shuffle=False,
     )
 
-    model = Classifier(ModelM3())
-    trainer.fit(model=model, train_dataloaders=train_loader)
-    trainer.test(model=model, dataloaders=test_loader)
+    model: torch.nn.Module
+    for model in [ModelM3, ModelM5, ModelM7]:
+        cov_model = covariance.SquaredExponential()
+        cov_model.auto_fit(
+            model_factory=model,
+            loss=F.nll_loss,
+            data=train_dataset,
+            cache=f"logs/mnist/{model.__name__}/covariance_cache/nll.csv"
+        )
+
+        classifiers = {}
+        for (name, opt) in {
+            "RFD": func.partial(RFD, covariance_model=cov_model),
+            "Adam": optim.Adam,
+            "SGD": optim.SGD
+        }.items():
+            trainer = L.Trainer(
+                max_epochs=2,
+                log_every_n_steps=1,
+                default_root_dir=f"logs/mnist/{model.__name__}/{name}"
+            )
+            classifier = Classifier(model(), optimizer=opt)
+            classifiers[name] = classifier
+            trainer.fit(model=classifier, train_dataloaders=train_loader)
+            trainer.test(model=classifier, dataloaders=test_loader)
 
 
 if __name__ == "__main__":
-    run()
+    mnist_training()

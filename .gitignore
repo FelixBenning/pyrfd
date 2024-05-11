@@ -165,4 +165,6 @@ cython_debug/
 
 # Caches
 cache/*
+logs/*
 lightning_logs/*
+slurm-*
