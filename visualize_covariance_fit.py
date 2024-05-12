@@ -15,7 +15,7 @@ sampler = sampling.IsotropicSampler(
     model_factory = CNN7,
     loss= F.nll_loss,
     data= mnist.train_data,
-    cache= "MNIST_CNN7_b_size100_oversampled.csv"
+    cache= "MNIST_CNN7_oversampled.csv"
 )
 
 if len(sampler) == 0:
