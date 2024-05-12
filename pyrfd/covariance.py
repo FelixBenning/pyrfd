@@ -23,7 +23,7 @@ from .batchsize import (
     theoretical_intercept_variance,
 )
 
-from .sampling import CachedSamples, IsotropicSampler, budget_use
+from .sampling import CSVSampleCache, IsotropicSampler, SampleCache 
 
 
 def selection(sorted_list, num_elts):
@@ -203,7 +203,7 @@ class IsotropicCovariance:
         )
         return enumerator / denominator
 
-    def fit(self, df: pd.DataFrame, dims):
+    def fit(self, df: pd.DataFrame):
         """Fit the covariance model with loss and gradient norm samples
         provided in a pandas dataframe, with columns containing:
 
@@ -211,7 +211,6 @@ class IsotropicCovariance:
         - loss
         - grad_norm or sq_grad_norm
         """
-        self.dims = dims
         if ("sq_grad_norm" not in df) and ("grad_norm" in df):
             df["sq_grad_norm"] = df["grad_norm"] ** 2
 
@@ -222,11 +221,28 @@ class IsotropicCovariance:
         self.g_var_reg: LinearRegression = isotropic_derivative_var_estimation(
             df["batchsize"], df["sq_grad_norm"], g_var_reg=self.g_var_reg
         )
+
         self.fitted = True
+
+        if self.var_reg.intercept_ <= 0:
+            warning(
+                "The variance regression has a negative intercept, since negative"
+                "variances are not meaningful, the regression is reset to None."
+            )
+            self.fitted = False
+            self.var_reg = None
+        
+        if self.g_var_reg.intercept_ <= 0:
+            warning(
+                "The gradient variance regression has a negative intercept, since negative"
+                "variances are not meaningful, the regression is reset to None."
+            )
+            self.fitted = False
+            self.g_var_reg = None
 
         return self
 
-    def plot_sanity_checks(self, df: pd.DataFrame):
+    def plot_sanity_checks(self, df: pd.DataFrame, batch_sizes=None):
         """Plot Sanity Check Plots"""
         fig, axs = plt.subplots(3, 2)
 
@@ -244,9 +260,9 @@ class IsotropicCovariance:
             dims=self.dims,
         )
 
-        plots.qq_plot_losses(axs[0, 1], df)
-        plots.qq_plot_squared_losses(axs[1, 1], df, mean=self.mean)
-        plots.qq_plot_sq_gradient_norms(axs[2, 1], df, dims=self.dims)
+        plots.qq_plot_losses(axs[0, 1], df, batch_sizes=batch_sizes)
+        plots.qq_plot_squared_losses(axs[1, 1], df, mean=self.mean, batch_sizes=batch_sizes)
+        plots.qq_plot_sq_gradient_norms(axs[2, 1], df, dims=self.dims, batch_sizes=batch_sizes)
 
         return (fig, axs)
 
@@ -257,7 +273,7 @@ class IsotropicCovariance:
         loss,
         data,
         *,
-        cache=None,
+        cache: SampleCache | str | None = None,
         tol=0.4,
         initial_budget=6000,
         max_iter=10,
@@ -275,33 +291,23 @@ class IsotropicCovariance:
         different batch size parameters such that it returns (x,y) tuples when
         iterated on
         """
-        self.dims = sum(
-            p.numel() for p in model_factory().parameters() if p.requires_grad
-        )
         print(f"\n\nAutomatically fitting Covariance Model: {repr(self)}")
 
-        cached_samples = CachedSamples(cache)
-        sampler = IsotropicSampler(model_factory, loss, data)
+        sampler = IsotropicSampler(
+            model_factory,
+            loss,
+            data,
+            cache=(cache if isinstance(cache, SampleCache) else CSVSampleCache(cache)),
+        )
+        self.dims = sampler.dims
 
         budget = initial_budget
         outer_pgb = None
         for idx in range(max_iter):
-            # COPY of cached_samples, not ref
-            samples = cached_samples.as_dataframe()
+            if len(sampler) >  0 and sampler.sample_cost >= initial_budget:
+                self.fit(sampler.snapshot_as_dataframe())
 
-            bsize_counts = pd.Series()
-            if len(cached_samples) > 0:
-                bsize_counts = samples["batchsize"].value_counts()
-
-            total_samples = budget_use(bsize_counts)
-            if total_samples >= initial_budget:
-                self.fit(samples, self.dims)
-
-            if self.var_reg and self.var_reg.intercept_ <= 0:
-                # negative variance est -> reset
-                self.fitted = False
-                self.var_reg = None
-
+            bsize_counts = sampler.bsize_counts
             if self.fitted:
                 var_var = empirical_intercept_variance(bsize_counts, self.var_reg)
                 rel_error = np.sqrt(var_var) / self.var_reg.intercept_
@@ -330,7 +336,7 @@ class IsotropicCovariance:
                 # allocate budget in 20% chunks to allow for early stopping
                 budget = min(
                     pred_necessary_budget / 5,
-                    (pred_necessary_budget - total_samples) * 1.1,
+                    (pred_necessary_budget - sampler.sample_cost) * 1.1,
                 )
 
                 # PROGRESS Logging ================================================
@@ -345,7 +351,7 @@ class IsotropicCovariance:
                         position=0,
                         leave=False,
                     )
-                    outer_pgb.update(total_samples)
+                    outer_pgb.update(sampler.sample_cost)
                 else:
                     outer_pgb.total = int(np.ceil(pred_necessary_budget))
                 outer_pgb.refresh()
@@ -356,10 +362,7 @@ class IsotropicCovariance:
                 self.var_reg,
                 bsize_counts,
             )
-            used_budget = sampler.sample(
-                needed_bsize_counts,
-                append_to=cached_samples,
-            )
+            used_budget = sampler.sample(needed_bsize_counts)
             if outer_pgb:
                 outer_pgb.update(used_budget)
         if outer_pgb:

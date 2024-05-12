@@ -19,7 +19,7 @@ cov_model.auto_fit(
     ),
     cache="cache/CNN3_mnist.csv",
 )
-cached_samples = sampling.CachedSamples("cache/CNN3_mnist.csv")
+cached_samples = sampling.CSVSampleCache("cache/CNN3_mnist.csv")
 cov_model.plot_sanity_checks(cached_samples.as_dataframe())
 
 rfd = RFD(ModelM3().parameters(), covariance_model=cov_model)

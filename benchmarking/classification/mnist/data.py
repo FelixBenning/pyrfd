@@ -3,7 +3,10 @@ import torch
 from torch.utils.data import random_split, DataLoader
 
 # Note - you must have torchvision installed for this example
-from torchvision.datasets import MNIST as MNISTDataset, FashionMNIST as FashionMNISTDataset
+from torchvision.datasets import (
+    MNIST as MNISTDataset,
+    FashionMNIST as FashionMNISTDataset,
+)
 from torchvision import transforms
 
 
@@ -34,9 +37,13 @@ class MNIST(L.LightningDataModule):
     def setup(self, stage: str):
         # Assign train/val datasets for use in dataloaders
         if stage == "fit":
-            mnist_full = MNISTDataset(self.data_dir, train=True, transform=self.transform)
-            self.train_data, self.validation_data = random_split(
-                mnist_full, [0.8, 0.2], generator=torch.Generator().manual_seed(42)
+            self.train_data = MNISTDataset(
+                self.data_dir, train=True, transform=self.transform
+            )
+
+        if stage == "validate":
+            self.validation_data = MNISTDataset(
+                self.data_dir, train=False, transform=self.transform
             )
 
         # Assign test dataset for use in dataloader(s)
@@ -61,6 +68,7 @@ class MNIST(L.LightningDataModule):
 
     def predict_dataloader(self):
         return DataLoader(self.prediction_data, batch_size=self.batch_size)
+
 
 class FashionMNIST(L.LightningDataModule):
     """Represents the MNIST dataset.
@@ -89,7 +97,9 @@ class FashionMNIST(L.LightningDataModule):
     def setup(self, stage: str):
         # Assign train/val datasets for use in dataloaders
         if stage == "fit":
-            mnist_full = FashionMNISTDataset(self.data_dir, train=True, transform=self.transform)
+            mnist_full = FashionMNISTDataset(
+                self.data_dir, train=True, transform=self.transform
+            )
             self.train_data, self.validation_data = random_split(
                 mnist_full, [0.8, 0.2], generator=torch.Generator().manual_seed(42)
             )
