@@ -3,10 +3,11 @@
 import pandas as pd
 import numpy as np
 from scipy import stats
-from sklearn.linear_model import LinearRegression
+
+from .regression import ScalarRegression
 
 
-def plot_loss(ax, df: pd.DataFrame, *, mean, var_reg: LinearRegression):
+def plot_loss(ax, df: pd.DataFrame, *, mean, var_reg: ScalarRegression):
     """
     Plot Losses with mean, batch wise mean and variance based 95%-confidence interval
     under the Gaussian assumption.
@@ -171,7 +172,7 @@ def qq_plot_squared_losses(ax, df: pd.DataFrame, *, mean, batch_sizes=None):
     ax.legend()
 
 
-def plot_gradient_norms(ax, df: pd.DataFrame, *, g_var_reg: LinearRegression, dims):
+def plot_gradient_norms(ax, df: pd.DataFrame, *, g_var_reg: ScalarRegression, dims):
     """Plot gradient norms, mean and batch wise means and 95% confidence interval
     based on sums of squared Gaussian i.e. chi2(dims) assumption
     """

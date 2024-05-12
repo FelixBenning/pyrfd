@@ -18,8 +18,9 @@ def budget_use(bsize_counts):
     """calculate the used budget from b_size counts"""
     return sum(bsize * count for bsize, count in bsize_counts.items())
 
+
 class SampleCache:
-    """ Base Class for Abstraction for Samples collected so far
+    """Base Class for Abstraction for Samples collected so far
 
     Acts as a context manager when adding new samples to allows for
     KeyboardInterrupt while still saving all generated samples so far.
@@ -32,7 +33,7 @@ class SampleCache:
     `self._records`
     """
 
-    __slots__ = [ "_records" ]
+    __slots__ = ["_records"]
 
     @abstractmethod
     def __init__(self) -> None:
@@ -40,26 +41,27 @@ class SampleCache:
 
     def as_dataframe(self):
         """Returns a copy (not reference!) of the current samples in the form of a dataframe"""
-        return pd.DataFrame.from_records(self._records) # pylint: disable=no-member
+        return pd.DataFrame.from_records(self._records)  # pylint: disable=no-member
 
     def __len__(self):
-        return len(self._records) # pylint: disable=no-member
+        return len(self._records)  # pylint: disable=no-member
 
     def __enter__(self):
-        return self._records # pylint: disable=no-member
+        return self._records  # pylint: disable=no-member
 
     @abstractmethod
     def __exit__(self, excep_type, excep_val, exc_traceback):
         raise NotImplementedError
 
+
 class CSVSampleCache(SampleCache):
     """Abstraction for samples collected so far
 
     Acts as a context manager when adding new samples to allows for KeyboardInterrupt
-    while still saving all generated samples so far. Saving them to CSV 
+    while still saving all generated samples so far. Saving them to CSV
     """
 
-    __slots__ = [ "filename" ]
+    __slots__ = ["filename"]
 
     def __init__(self, filename=None):
         self.filename = filename
@@ -85,7 +87,9 @@ class IsotropicSampler:
     """Sampling the loss function under the isotropy assumption (i.e. randomly
     samples inputs and does not treat them differently)"""
 
-    def __init__(self, model_factory, loss, data, cache: SampleCache | str | None=None) -> None:
+    def __init__(
+        self, model_factory, loss, data, cache: SampleCache | str | None = None
+    ) -> None:
         if isinstance(cache, str):
             cache = CSVSampleCache(cache)
         self.cache = cache
@@ -130,16 +134,15 @@ class IsotropicSampler:
 
     @property
     def dims(self):
-        """ Returns the dimension of the model parameters of the model factory """
+        """Returns the dimension of the model parameters of the model factory"""
         return self._dims
-
 
     @property
     def bsize_counts(self):
         """Returns the counts of batch sizes in the cache"""
         if self.cache is None:
             return pd.Series()
-        return self.cache.as_dataframe()["batchsize"].value_counts()
+        return self.cache.as_dataframe().get("batchsize", pd.Series()).value_counts()
 
     @property
     def sample_cost(self):

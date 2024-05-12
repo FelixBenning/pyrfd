@@ -7,9 +7,9 @@ from ctypes import ArgumentError
 import numpy as np
 from scipy import optimize, stats
 import pandas as pd
-from sklearn.linear_model import LinearRegression
 from tqdm import tqdm
 
+from .regression import ScalarRegression
 from .sampling import budget_use
 
 CUTOFF = 20  # no batch-sizes below
@@ -19,7 +19,7 @@ def sq_error_var(var_reg, b):
     """calculate the 4th moment (for Gaussian rvs) i.e. variance of centered
     squares, where the variance regression determines their variance for
     different batchsizes"""
-    return 3 * var_reg.predict((1 / np.asarray(b)).reshape(-1, 1)) ** 2
+    return 3 * var_reg(1 / np.asarray(b)) ** 2
 
 
 def empirical_intercept_variance(counts, var_reg):
@@ -61,9 +61,7 @@ def batchsize_dist(var_reg=None, logging=False):
     """
     if var_reg is None:
         # DEFAULT_VAR_REG
-        var_reg = LinearRegression()
-        var_reg.intercept_ = 0.05  # should be greater zero - cf. sampling
-        var_reg.coef_ = np.array([1])
+        var_reg = ScalarRegression(intercept=0.05, slope=1)
 
     beta_0 = var_reg.intercept_
     beta_1 = var_reg.coef_[0]

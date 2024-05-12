@@ -6,9 +6,8 @@ using loss samples and they provide a learning rate
 from abc import abstractmethod
 from ctypes import ArgumentError
 from logging import warning
-import math
+from typing import Tuple
 import pandas as pd
-from sklearn.linear_model import LinearRegression
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
@@ -23,123 +22,12 @@ from .batchsize import (
     theoretical_intercept_variance,
 )
 
-from .sampling import CSVSampleCache, IsotropicSampler, SampleCache 
-
-
-def selection(sorted_list, num_elts):
-    """
-    return a selection of num_elts from the sorted_list (evenly spaced in the index)
-    always includes the first and last index
-    """
-    if len(sorted_list) < num_elts:
-        return sorted_list
-    idxs = np.round(np.linspace(0, len(sorted_list) - 1, num_elts)).astype(int)
-    return sorted_list[idxs]
-
-
-def fit_mean_var(
-    batch_sizes: np.array,
-    batch_losses: np.array,
-    *,
-    max_bootstrap=100,
-    var_reg=None,
-    logging=False,
-):
-    """Bootstraps weighted least squares regression (WLS) to determine the mean,
-    and variance of the loss at varying batchsizes. Returns the mean and variance
-    regression.
-
-    An existing regression can be passed to act as a starting point
-    for the bootstrap.
-    """
-    batch_sizes = np.array(batch_sizes)
-    batch_losses = np.array(batch_losses)
-    b_inv = 1 / batch_sizes
-
-    if var_reg is None:
-        var_reg = LinearRegression(fit_intercept=True)
-        # we initialize with the assumption that the variance at batch_size=Inf is zero
-        # this will give large batch sizes outsized weighting at the start which is better
-        # than the other way around, which can easily lead to negative intercept estimations.
-        var_reg.intercept_ = 0
-        var_reg.coef_ = np.array([1])
-
-    # bootstrapping Weighted Least Squares (WLS)
-    for idx in range(max_bootstrap):
-        variances = var_reg.predict(
-            b_inv.reshape(-1, 1)
-        )  # variance at batchsizes 1/b in X
-
-        mu = np.average(batch_losses, weights=1 / variances)
-        centered_squares = (batch_losses - mu) ** 2
-
-        old_intercept = var_reg.intercept_
-        # fourth moments i.e. 3*sigma^4 = 3 * var^2 are the variance of the centered
-        # squares, the weights should be 1/these variances
-        # (we leave out the 3 as it does not change the relative weights)
-        var_reg.fit(
-            b_inv.reshape(-1, 1),
-            centered_squares,
-            sample_weight=1 / variances**2,
-        )
-
-        if math.isclose(old_intercept, var_reg.intercept_):
-            if logging:
-                tqdm.write(f"Bootstrapping WLS converged in {idx} iterations")
-            return {"mean": mu, "var_regression": var_reg}
-
-    warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
-    return {"mean": mu, "var_regression": var_reg}
-
-
-def isotropic_derivative_var_estimation(
-    batch_sizes: np.array,
-    sq_grad_norms: np.array,
-    *,
-    max_bootstrap=100,
-    g_var_reg=None,
-    logging=False,
-) -> LinearRegression:
-    """Bootstraps weighted least squares regression (WLS) to determine the
-    expectation of gradient norms of the loss at varying batchsizes.
-    Returns the regression of the mean against 1/b where b is the batchsize.
-
-    An existing regression can be passed to act as a starting point
-    for the bootstrap.
-    """
-    batch_sizes = np.array(batch_sizes)
-    b_inv: np.array = 1 / batch_sizes
-
-    if g_var_reg is None:
-        g_var_reg = LinearRegression(fit_intercept=True)
-        # we initialize with the assumption that the variance at batch_size=Inf is zero
-        # this will give large batch sizes outsized weighting at the start which is better
-        # than the other way around, which can easily lead to negative intercept estimations.
-        g_var_reg.intercept_ = 0
-        g_var_reg.coef_ = np.array([1])
-
-    # bootstrapping WLS
-    for idx in range(max_bootstrap):
-        variances: np.array = g_var_reg.predict(
-            b_inv.reshape(-1, 1)
-        )  # variances at batchsize 1/b
-
-        # squared grad norms are already (iid) sums of squared Gaussians
-        # variance of squares is 3Var^2 but the 3 does not matter as it cancels
-        # out in the weighting we also have a sum of squares (norm), but this
-        # also only results in a constant which does not matter
-        old_bias = g_var_reg.intercept_
-        g_var_reg.fit(
-            b_inv.reshape(-1, 1), sq_grad_norms, sample_weight=1 / variances**2
-        )
-
-        if math.isclose(old_bias, g_var_reg.intercept_):
-            if logging:
-                tqdm.write(f"Bootstrapping WLS converged in {idx} iterations")
-            return g_var_reg
-
-    warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
-    return g_var_reg
+from .sampling import CSVSampleCache, IsotropicSampler, SampleCache
+from .regression import (
+    ScalarRegression,
+    fit_mean_var,
+    isotropic_derivative_var_estimation,
+)
 
 
 class IsotropicCovariance:
@@ -148,34 +36,88 @@ class IsotropicCovariance:
     Can be subclassed for specific covariance models (see e.g. SquaredExponential)
     """
 
-    __slots__ = "mean", "var_reg", "g_var_reg", "dims", "fitted"
+    __slots__ = "mean", "var_reg", "g_var_reg", "dims", "_fitted"
 
-    # pylint: disable=too-many-arguments
     def __init__(
         self,
         *,
         mean=None,
-        var_reg=None,
-        g_var_reg=None,
+        variance: Tuple[float, float] | None = None,
+        gradient_var: Tuple[float, float] | None = None,
         dims=None,
-        fitted=False,
     ) -> None:
         self.mean = mean
-        self.var_reg = var_reg
-        self.g_var_reg = g_var_reg
+
+        if variance is None:
+            self.var_reg = None
+        else:
+            self.var_reg = ScalarRegression(*variance)
+            assert self.var_reg.is_plausible_variance_regression
+
+        if gradient_var is None:
+            self.g_var_reg = None
+        else:
+            self.g_var_reg = ScalarRegression(*gradient_var)
+            assert self.g_var_reg.is_plausible_variance_regression
+
         self.dims = dims
-        self.fitted = fitted
+
+        self._fitted = False
+        if (self.mean is not None) and self.var_reg and self.g_var_reg and self.dims:
+            self._fitted = True
 
     def __repr__(self) -> str:
+        var = repr(None)
+        if self.var_reg:
+            var = f"({self.var_reg.intercept}, {self.var_reg.slope})"
+
+        g_var = repr(None)
+        if self.g_var_reg:
+            g_var = f"({self.g_var_reg.intercept}, {self.g_var_reg.slope})"
+
         return (
             f"{self.__class__.__name__}(\n"
             f"    mean={self.mean},\n"
-            f"    var_reg={self.var_reg},\n"
-            f"    g_var_reg={self.g_var_reg},\n"
-            f"    dims={self.dims},\n"
-            f"    fitted={self.fitted}\n"
+            f"    variance={var},\n"
+            f"    gradient_var={g_var},\n"
+            f"    dims={self.dims}\n"
             ")"
         )
+
+    def __getstate__(self):
+        if not self._fitted:
+            warning("The covariance model has not been fitted, saving it is pointless")
+            return {}
+
+        return {
+            "mean": self.mean,
+            "var_reg": [self.var_reg.intercept_, self.var_reg.coef_[0]],
+            "g_var_reg": [self.g_var_reg.intercept_, self.g_var_reg.coef_[0]],
+            "dims": self.dims,
+        }
+
+    def __setstate__(self, state):
+        if not state:
+            return
+
+        assert all(
+            x > 0 for x in state["var_reg"]
+        ), "Negative variances are not meaningful"
+        assert all(
+            x > 0 for x in state["g_var_reg"]
+        ), "Negative variances are not meaningful"
+
+        self.mean = state["mean"]
+        self.var_reg = ScalarRegression(
+            intercept=state["var_reg"][0], slope=state["var_reg"][1]
+        )
+        self.g_var_reg = ScalarRegression(
+            intercept=state["g_var_reg"][0], slope=state["g_var_reg"][1]
+        )
+
+        self.dims = state["dims"]
+
+        self._fitted = True
 
     @abstractmethod
     def learning_rate(self, loss, grad_norm, b_size_inv=0):
@@ -191,15 +133,13 @@ class IsotropicCovariance:
         limiting_loss:
             The loss at the end of optimization (default is 0)
         """
-        assert self.fitted, "The covariance has not been fitted yet."
+        assert self._fitted, "The covariance has not been fitted yet."
         assert (
             b_size_inv <= 1
         ), "Please pass the batch size inverse 1/b not the batch size b"
-        enumerator = self.var_reg.predict(np.array(b_size_inv).reshape(-1, 1))[0]
+        enumerator = self.var_reg(b_size_inv)
         denominator = (
-            self.g_var_reg.predict(np.array(b_size_inv).reshape(-1, 1))[0]
-            / self.dims
-            * (self.mean - limiting_loss)
+            self.g_var_reg(b_size_inv) / self.dims * (self.mean - limiting_loss)
         )
         return enumerator / denominator
 
@@ -216,28 +156,28 @@ class IsotropicCovariance:
 
         tmp = fit_mean_var(df["batchsize"], df["loss"], var_reg=self.var_reg)
         self.mean = tmp["mean"]
-        self.var_reg: LinearRegression = tmp["var_regression"]
+        self.var_reg: ScalarRegression = tmp["var_regression"]
 
-        self.g_var_reg: LinearRegression = isotropic_derivative_var_estimation(
+        self.g_var_reg: ScalarRegression = isotropic_derivative_var_estimation(
             df["batchsize"], df["sq_grad_norm"], g_var_reg=self.g_var_reg
         )
 
-        self.fitted = True
+        self._fitted = True
 
-        if self.var_reg.intercept_ <= 0:
+        if not self.var_reg.is_plausible_variance_regression:
             warning(
-                "The variance regression has a negative intercept, since negative"
+                "The variance regression has a negative intercept, since negative "
                 "variances are not meaningful, the regression is reset to None."
             )
-            self.fitted = False
+            self._fitted = False
             self.var_reg = None
-        
-        if self.g_var_reg.intercept_ <= 0:
+
+        if not self.g_var_reg.is_plausible_variance_regression:
             warning(
-                "The gradient variance regression has a negative intercept, since negative"
+                "The gradient variance regression has a negative intercept, since negative "
                 "variances are not meaningful, the regression is reset to None."
             )
-            self.fitted = False
+            self._fitted = False
             self.g_var_reg = None
 
         return self
@@ -261,8 +201,12 @@ class IsotropicCovariance:
         )
 
         plots.qq_plot_losses(axs[0, 1], df, batch_sizes=batch_sizes)
-        plots.qq_plot_squared_losses(axs[1, 1], df, mean=self.mean, batch_sizes=batch_sizes)
-        plots.qq_plot_sq_gradient_norms(axs[2, 1], df, dims=self.dims, batch_sizes=batch_sizes)
+        plots.qq_plot_squared_losses(
+            axs[1, 1], df, mean=self.mean, batch_sizes=batch_sizes
+        )
+        plots.qq_plot_sq_gradient_norms(
+            axs[2, 1], df, dims=self.dims, batch_sizes=batch_sizes
+        )
 
         return (fig, axs)
 
@@ -304,11 +248,11 @@ class IsotropicCovariance:
         budget = initial_budget
         outer_pgb = None
         for idx in range(max_iter):
-            if len(sampler) >  0 and sampler.sample_cost >= initial_budget:
+            if len(sampler) > 0 and sampler.sample_cost >= initial_budget:
                 self.fit(sampler.snapshot_as_dataframe())
 
             bsize_counts = sampler.bsize_counts
-            if self.fitted:
+            if self._fitted:
                 var_var = empirical_intercept_variance(bsize_counts, self.var_reg)
                 rel_error = np.sqrt(var_var) / self.var_reg.intercept_
                 tqdm.write(f"\nCheckpoint {idx}:")
@@ -380,8 +324,8 @@ class SquaredExponential(IsotropicCovariance):
     @property
     def variance(self):
         """the estimated variance (should only be accessed after fitting)"""
-        if self.fitted:
-            return self.var_reg.intercept_
+        if self._fitted:
+            return self.var_reg.intercept
         raise ArgumentError(
             "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
         )
@@ -389,8 +333,8 @@ class SquaredExponential(IsotropicCovariance):
     @property
     def scale(self):
         """the estimated scale (should only be accessed after fitting)"""
-        if self.fitted:
-            return np.sqrt(self.variance * self.dims / self.g_var_reg.intercept_)
+        if self._fitted:
+            return np.sqrt(self.variance * self.dims / self.g_var_reg.intercept)
         raise ArgumentError(
             "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
         )
@@ -402,12 +346,8 @@ class SquaredExponential(IsotropicCovariance):
         g_var_reg = self.g_var_reg
 
         # C(0)/(C(0) + 1/b * C_eps(0))
-        var_adjust = var_reg.intercept_ / (
-            var_reg.intercept_ + var_reg.coef_[0] * b_size_inv
-        )
-        var_g_adjust = g_var_reg.intercept_ / (
-            g_var_reg.intercept_ + g_var_reg.coef_[0] * b_size_inv
-        )
+        var_adjust = var_reg.intercept / var_reg(b_size_inv)
+        var_g_adjust = g_var_reg.intercept / g_var_reg(b_size_inv)
 
         tmp = var_adjust * (self.mean - loss) / 2
         return (
