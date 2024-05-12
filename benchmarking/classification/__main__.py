@@ -26,46 +26,39 @@ def train_classic(
     data: L.LightningDataModule = problem["dataset"](batch_size=problem["batch_size"])
     classifier = Classifier(problem["model"](), optimizer=opt, **hyperparameters)
 
-    trainer = trainer_from_problem(problem, opt_name=opt.__name__)
+    trainer = trainer_from_problem(problem, opt_name=opt.__name__, hyperparameters=hyperparameters)
     trainer.fit(classifier, data)
     trainer.test(classifier, data)
 
 
-def train_rfd(problem, cov_string, covariance_model):
+def train_rfd(problem, hyperparameters):
     """Train a Classifier with RFD"""
     data: L.LightningDataModule = problem["dataset"](batch_size=problem["batch_size"])
     data.prepare_data()
     data.setup("fit")
 
-    covariance_model.auto_fit(
-        model_factory=problem["model"],
-        loss=F.nll_loss,
-        data=data.train_data,
-        cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
-    )
 
     classifier = Classifier(
         problem["model"](),
         optimizer=RFD,
-        covariance_model=covariance_model,
-        b_size_inv=1/problem["batch_size"],
+        **hyperparameters,
     )
 
-    trainer = trainer_from_problem(problem, opt_name=f"RFD({cov_string})")
+    trainer = trainer_from_problem(problem, opt_name="RFD", hyperparameters=hyperparameters)
     trainer.fit(classifier, data)
     trainer.test(classifier, data)
 
 
-def trainer_from_problem(problem, opt_name):
-    problem_id = f"{problem['dataset'].__name__}_{problem['model'].__name__}_{problem['batch_size']}"
+def trainer_from_problem(problem, opt_name, hyperparameters):
+    problem_id = f"{problem['dataset'].__name__}_{problem['model'].__name__}_b={problem['batch_size']}"
 
-    tlogger = TensorBoardLogger("logs/TensorBoard", name=problem_id + opt_name)
-    csvlogger = CSVLogger("logs", name=problem_id + opt_name)
+    hparams = "_".join([f"{key}={value}" for key, value in hyperparameters.items()])
+    name = problem_id + "/" + opt_name + "(" + hparams + ")"
+    tlogger = TensorBoardLogger("logs/TensorBoard", name=name)
+    csvlogger = CSVLogger("logs", name=name)
 
-    tlogger.log_hyperparams(params={"batch_size": problem["batch_size"]})
-    csvlogger.log_hyperparams(params={"batch_size": problem["batch_size"]})
     return L.Trainer(
-        max_epochs=5,
+        max_epochs=30,
         log_every_n_steps=1,
         logger=[tlogger, csvlogger],
     )
@@ -74,14 +67,36 @@ def trainer_from_problem(problem, opt_name):
 def main():
     problem = {
         "dataset": MNIST,
-        "model": CNN3,
-        "batch_size": 100,
+        "model": CNN7,
+        "batch_size": 1000,
     }
+
+    # fit covariance model
+    data: L.LightningDataModule = problem["dataset"](batch_size=problem["batch_size"])
+    data.prepare_data()
+    data.setup("fit")
+    covariance_model = covariance.SquaredExponential()
+    covariance_model.auto_fit(
+        model_factory=problem["model"],
+        loss=F.nll_loss,
+        data=data.data_train,
+        cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
+    )
+    # ------
 
     train_rfd(
         problem,
-        cov_string="SquaredExponential",
-        covariance_model=covariance.SquaredExponential(),
+        hyperparameters={
+            "covariance_model": covariance_model,
+        }
+    )
+
+    train_rfd(
+        problem,
+        hyperparameters={
+            "covariance_model": covariance_model,
+            "b_size_inv": 1/problem["batch_size"],
+        }
     )
 
     train_classic(

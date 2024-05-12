@@ -66,6 +66,7 @@ class IsotropicCovariance:
         if (self.mean is not None) and self.var_reg and self.g_var_reg and self.dims:
             self._fitted = True
 
+
     def __repr__(self) -> str:
         var = repr(None)
         if self.var_reg:
@@ -76,11 +77,11 @@ class IsotropicCovariance:
             g_var = f"({self.g_var_reg.intercept}, {self.g_var_reg.slope})"
 
         return (
-            f"{self.__class__.__name__}(\n"
-            f"    mean={self.mean},\n"
-            f"    variance={var},\n"
-            f"    gradient_var={g_var},\n"
-            f"    dims={self.dims}\n"
+            f"{self.__class__.__name__}("
+            f"mean={self.mean}, "
+            f"variance={var}, "
+            f"gradient_var={g_var}, "
+            f"dims={self.dims}"
             ")"
         )
 

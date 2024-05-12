@@ -1,6 +1,5 @@
 import lightning as L
-import torch
-from torch.utils.data import random_split, DataLoader
+from torch.utils.data import DataLoader
 
 # Note - you must have torchvision installed for this example
 from torchvision.datasets import (
@@ -37,35 +36,35 @@ class MNIST(L.LightningDataModule):
     def setup(self, stage: str):
         # Assign train/val datasets for use in dataloaders
         if stage == "fit":
-            self.train_data = MNISTDataset(
+            self.data_train = MNISTDataset(
                 self.data_dir, train=True, transform=self.transform
             )
-            self.validation_data = MNISTDataset(
+            self.data_val = MNISTDataset(
                 self.data_dir, train=False, transform=self.transform
             )
 
         # Assign test dataset for use in dataloader(s)
         if stage == "test":
-            self.test_data = MNISTDataset(
+            self.data_test = MNISTDataset(
                 self.data_dir, train=False, transform=self.transform
             )
 
         if stage == "predict":
-            self.prediction_data = MNISTDataset(
+            self.data_predict = MNISTDataset(
                 self.data_dir, train=False, transform=self.transform
             )
 
     def train_dataloader(self):
-        return DataLoader(self.train_data, batch_size=self.batch_size, shuffle=True)
+        return DataLoader(self.data_train, batch_size=self.batch_size, shuffle=True)
 
     def val_dataloader(self):
-        return DataLoader(self.validation_data, batch_size=self.batch_size)
+        return DataLoader(self.data_val, batch_size=self.batch_size)
 
     def test_dataloader(self):
-        return DataLoader(self.test_data, batch_size=self.batch_size)
+        return DataLoader(self.data_test, batch_size=self.batch_size)
 
     def predict_dataloader(self):
-        return DataLoader(self.prediction_data, batch_size=self.batch_size)
+        return DataLoader(self.data_predict, batch_size=self.batch_size)
 
 
 class FashionMNIST(L.LightningDataModule):
@@ -95,32 +94,32 @@ class FashionMNIST(L.LightningDataModule):
     def setup(self, stage: str):
         # Assign train/val datasets for use in dataloaders
         if stage == "fit":
-            self.train_data = FashionMNISTDataset(
+            self.data_train = FashionMNISTDataset(
                 self.data_dir, train=True, transform=self.transform
             )
-            self.validation_data = FashionMNISTDataset(
+            self.data_val = FashionMNISTDataset(
                 self.data_dir, train=False, transform=self.transform
             )
 
         # Assign test dataset for use in dataloader(s)
         if stage == "test":
-            self.test_data = FashionMNISTDataset(
+            self.data_test = FashionMNISTDataset(
                 self.data_dir, train=False, transform=self.transform
             )
 
         if stage == "predict":
-            self.prediction_data = FashionMNISTDataset(
+            self.data_predict = FashionMNISTDataset(
                 self.data_dir, train=False, transform=self.transform
             )
 
     def train_dataloader(self):
-        return DataLoader(self.train_data, batch_size=self.batch_size, shuffle=True)
+        return DataLoader(self.data_train, batch_size=self.batch_size, shuffle=True)
 
     def val_dataloader(self):
-        return DataLoader(self.validation_data, batch_size=self.batch_size)
+        return DataLoader(self.data_val, batch_size=self.batch_size)
 
     def test_dataloader(self):
-        return DataLoader(self.test_data, batch_size=self.batch_size)
+        return DataLoader(self.data_test, batch_size=self.batch_size)
 
     def predict_dataloader(self):
-        return DataLoader(self.prediction_data, batch_size=self.batch_size)
+        return DataLoader(self.data_predict, batch_size=self.batch_size)

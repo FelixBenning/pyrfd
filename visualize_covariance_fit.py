@@ -14,7 +14,7 @@ cov_model = covariance.IsotropicCovariance()
 sampler = sampling.IsotropicSampler(
     model_factory = CNN7,
     loss= F.nll_loss,
-    data= mnist.train_data,
+    data= mnist.data_train,
     cache= "MNIST_CNN7_oversampled.csv"
 )
 
