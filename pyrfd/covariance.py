@@ -178,11 +178,11 @@ class IsotropicCovariance:
         )
 
     @abstractmethod
-    def learning_rate(self, loss, grad_norm, b_size_inverse=0):
+    def learning_rate(self, loss, grad_norm, b_size_inv=0):
         """learning rate of this covariance model from the RFD paper"""
         return NotImplemented
 
-    def asymptotic_learning_rate(self, b_size_inverse=0, limiting_loss=0):
+    def asymptotic_learning_rate(self, b_size_inv=0, limiting_loss=0):
         """asymptotic learning rate of RFD
 
         b_size_inverse:
@@ -193,11 +193,11 @@ class IsotropicCovariance:
         """
         assert self.fitted, "The covariance has not been fitted yet."
         assert (
-            b_size_inverse <= 1
+            b_size_inv <= 1
         ), "Please pass the batch size inverse 1/b not the batch size b"
-        enumerator = self.var_reg.predict(b_size_inverse)
+        enumerator = self.var_reg.predict(np.array(b_size_inv).reshape(-1, 1))[0]
         denominator = (
-            self.g_var_reg.predict(b_size_inverse)
+            self.g_var_reg.predict(np.array(b_size_inv).reshape(-1, 1))[0]
             / self.dims
             * (self.mean - limiting_loss)
         )
@@ -275,7 +275,9 @@ class IsotropicCovariance:
         different batch size parameters such that it returns (x,y) tuples when
         iterated on
         """
-        self.dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
+        self.dims = sum(
+            p.numel() for p in model_factory().parameters() if p.requires_grad
+        )
         print(f"\n\nAutomatically fitting Covariance Model: {repr(self)}")
 
         cached_samples = CachedSamples(cache)
@@ -390,16 +392,25 @@ class SquaredExponential(IsotropicCovariance):
             "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
         )
 
-    def learning_rate(self, loss, grad_norm, b_size_inverse=0):
+    def learning_rate(self, loss, grad_norm, b_size_inv=0):
         """RFD learning rate from Random Function Descent paper"""
 
+        var_reg = self.var_reg
+        g_var_reg = self.g_var_reg
+
         # C(0)/(C(0) + 1/b * C_eps(0))
-        var_adjust = self.var_reg.intercept_/self.var_reg.predict(b_size_inverse)
-        var_g_adjust = self.g_var_reg.intercept_/self.g_var_reg.predict(b_size_inverse)
+        var_adjust = var_reg.intercept_ / (
+            var_reg.intercept_ + var_reg.coef_[0] * b_size_inv
+        )
+        var_g_adjust = g_var_reg.intercept_ / (
+            g_var_reg.intercept_ + g_var_reg.coef_[0] * b_size_inv
+        )
 
         tmp = var_adjust * (self.mean - loss) / 2
-        return var_g_adjust * (self.scale**2) / (
-            torch.sqrt(tmp**2 + (self.scale * grad_norm * var_g_adjust) ** 2) + tmp
+        return (
+            var_g_adjust
+            * (self.scale**2)
+            / (torch.sqrt(tmp**2 + (self.scale * grad_norm * var_g_adjust) ** 2) + tmp)
         )
 
 

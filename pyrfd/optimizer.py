@@ -16,7 +16,13 @@ class RFD(Optimizer):
     """
 
     def __init__(
-        self, params, *, covariance_model: IsotropicCovariance, momentum=0, lr=1
+        self,
+        params,
+        *,
+        covariance_model: IsotropicCovariance,
+        momentum=0,
+        lr=1,
+        b_size_inv=0,
     ):
         defaults = {
             "cov": covariance_model,
@@ -24,6 +30,7 @@ class RFD(Optimizer):
             "lr": lr,  # really a learning rate multiplier,
             # but this name ensures compatibility with schedulers
             "learning_rate": None,
+            "b_size_inv": b_size_inv,
         }
         super().__init__(params, defaults)
 
@@ -52,10 +59,13 @@ class RFD(Optimizer):
                 grad_norm = torch.cat(grads).norm()
 
                 momentum = group["momentum"]
-                lr = group["lr"]
+                lr_multiplier = group["lr"]
+                b_size_inv = group["b_size_inv"]
 
                 cov_model: IsotropicCovariance = group["cov"]
-                learning_rate = lr * cov_model.learning_rate(loss, grad_norm)
+                learning_rate = lr_multiplier * cov_model.learning_rate(
+                    loss, grad_norm, b_size_inv=b_size_inv
+                )
                 group["learning_rate"] = learning_rate
 
                 for param in group["params"]:

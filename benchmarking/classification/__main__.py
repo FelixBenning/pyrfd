@@ -45,7 +45,10 @@ def train_rfd(problem, cov_string, covariance_model):
     )
 
     classifier = Classifier(
-        problem["model"](), optimizer=RFD, covariance_model=covariance_model
+        problem["model"](),
+        optimizer=RFD,
+        covariance_model=covariance_model,
+        b_size_inv=1/problem["batch_size"],
     )
 
     trainer = trainer_from_problem(problem, opt_name=f"RFD({cov_string})")
@@ -62,7 +65,7 @@ def trainer_from_problem(problem, opt_name):
     tlogger.log_hyperparams(params={"batch_size": problem["batch_size"]})
     csvlogger.log_hyperparams(params={"batch_size": problem["batch_size"]})
     return L.Trainer(
-        max_epochs=2,
+        max_epochs=5,
         log_every_n_steps=1,
         logger=[tlogger, csvlogger],
     )
