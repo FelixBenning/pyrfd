@@ -63,11 +63,16 @@ class IsotropicCovariance:
         self.dims = dims
 
         self._fitted = False
-        if (self.mean is not None) and self.var_reg and self.g_var_reg and self.dims:
+        if self._is_fitted():
             self._fitted = True
 
+    def _is_fitted(self):
+        return (self.mean is not None) and self.var_reg and self.g_var_reg and self.dims
 
     def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(" + self._repr_helper() + ")"
+
+    def _repr_helper(self):
         var = repr(None)
         if self.var_reg:
             var = f"({self.var_reg.intercept}, {self.var_reg.slope})"
@@ -77,7 +82,6 @@ class IsotropicCovariance:
             g_var = f"({self.g_var_reg.intercept}, {self.g_var_reg.slope})"
 
         return (
-            f"{self.__class__.__name__}("
             f"mean={self.mean}, "
             f"variance={var}, "
             f"gradient_var={g_var}, "
@@ -85,40 +89,39 @@ class IsotropicCovariance:
             ")"
         )
 
-    def __getstate__(self):
-        if not self._fitted:
-            warning("The covariance model has not been fitted, saving it is pointless")
-            return {}
+    # def __getstate__(self):
+    #     if not self._fitted:
+    #         warning("The covariance model has not been fitted, saving it is pointless")
+    #         return {}
 
-        return {
-            "mean": self.mean,
-            "var_reg": [self.var_reg.intercept_, self.var_reg.coef_[0]],
-            "g_var_reg": [self.g_var_reg.intercept_, self.g_var_reg.coef_[0]],
-            "dims": self.dims,
-        }
+    #     return {
+    #         "mean": self.mean,
+    #         "var_reg": [self.var_reg.intercept_, self.var_reg.coef_[0]],
+    #         "g_var_reg": [self.g_var_reg.intercept_, self.g_var_reg.coef_[0]],
+    #         "dims": self.dims,
+    #     }
 
-    def __setstate__(self, state):
-        if not state:
-            return
+    # def __setstate__(self, state):
+    #     if not state:
+    #         return
 
-        assert all(
-            x > 0 for x in state["var_reg"]
-        ), "Negative variances are not meaningful"
-        assert all(
-            x > 0 for x in state["g_var_reg"]
-        ), "Negative variances are not meaningful"
+    #     assert all(
+    #         x > 0 for x in state["var_reg"]
+    #     ), "Negative variances are not meaningful"
+    #     assert all(
+    #         x > 0 for x in state["g_var_reg"]
+    #     ), "Negative variances are not meaningful"
 
-        self.mean = state["mean"]
-        self.var_reg = ScalarRegression(
-            intercept=state["var_reg"][0], slope=state["var_reg"][1]
-        )
-        self.g_var_reg = ScalarRegression(
-            intercept=state["g_var_reg"][0], slope=state["g_var_reg"][1]
-        )
+    #     self.mean = state["mean"]
+    #     self.var_reg = ScalarRegression(
+    #         intercept=state["var_reg"][0], slope=state["var_reg"][1]
+    #     )
+    #     self.g_var_reg = ScalarRegression(
+    #         intercept=state["g_var_reg"][0], slope=state["g_var_reg"][1]
+    #     )
 
-        self.dims = state["dims"]
-
-        self._fitted = True
+    #     self.dims = state["dims"]
+    #     self._fitted = True
 
     @abstractmethod
     def learning_rate(self, loss, grad_norm, b_size_inv=0):
@@ -317,7 +320,7 @@ class IsotropicCovariance:
 class SquaredExponential(IsotropicCovariance):
     """The Squared exponential covariance model. I.e.
 
-        C(x) = self.variance * exp(-x^2/(2*self.scale^2))
+        C(|x-y|^2/2) = self.variance * exp(-|x-y|^2/(2*self.scale^2))
 
     needs to be fitted using .auto_fit or .fit.
     """
@@ -351,11 +354,102 @@ class SquaredExponential(IsotropicCovariance):
         var_g_adjust = g_var_reg.intercept / g_var_reg(b_size_inv)
 
         tmp = var_adjust * (self.mean - loss) / 2
+        tmp = tmp if tmp > 0 else 0  # stability
         return (
             var_g_adjust
             * (self.scale**2)
             / (torch.sqrt(tmp**2 + (self.scale * grad_norm * var_g_adjust) ** 2) + tmp)
         )
+
+
+class RationalQuadratic(IsotropicCovariance):
+    """The Squared exponential covariance model. I.e.
+
+        C(|x-y|^2/2) = self.variance * (1+ |x-y|^2/(2*self.scale^2))^(-self.beta/2)
+
+    needs to be fitted using .auto_fit or .fit.
+    """
+
+    __slots__ = ("beta",)
+
+    def __init__(self, *, beta, **kwargs):
+        self.beta = beta
+        super().__init__(**kwargs) # calls _is_fitted, beta needs to be there
+
+    def _is_fitted(self):
+        return super()._is_fitted() and self.beta is not None
+
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(beta={self.beta}, " + self._repr_helper() + ")"
+        )
+
+    @property
+    def variance(self):
+        """the estimated variance (should only be accessed after fitting)"""
+        if self._fitted:
+            return self.var_reg.intercept
+        raise ArgumentError(
+            "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
+        )
+
+    @property
+    def scale(self):
+        """the estimated scale (should only be accessed after fitting)"""
+        if self._fitted:
+            return np.sqrt(self.variance * self.dims / self.g_var_reg.intercept)
+        raise ArgumentError(
+            "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
+        )
+
+    def learning_rate(self, loss, grad_norm, b_size_inv=0):
+        """RFD learning rate from Random Function Descent paper"""
+        if grad_norm == 0:  # fast return
+            return 0
+        if loss >= self.mean:
+            # stability: do not exceed this learning rate (not step size!)
+            return self.scale * np.sqrt(self.beta / (1 + self.beta)) / grad_norm
+
+        # --- Stochastic RFD ---
+        var_reg = self.var_reg
+        g_var_reg = self.g_var_reg
+
+        # C(0)/(C(0) + 1/b * C_eps(0))
+        var_adjust = var_reg.intercept / var_reg(b_size_inv)
+        var_g_adjust = g_var_reg.intercept / g_var_reg(b_size_inv)
+
+        xi = var_adjust / var_g_adjust * grad_norm / (self.mean - loss)
+        # -------------------------
+
+        tmp = np.sqrt(self.beta) / (self.scale * xi)
+        polynomial = [-1, tmp, (1 + self.beta), tmp]
+        # careful opposite order than np.root expects!
+
+        minimum = self.bisection_root_finder(polynomial) # confer paper for uniqueness
+
+        # learning rate, not step size!
+        return self.scale * np.sqrt(self.beta) * minimum / grad_norm
+
+
+
+    def bisection_root_finder(self, polynomial):
+        """ find the root of an increasing polynomial on the interval [0, 1/sqrt(1+beta)] """
+        left = 0
+        right = 1/ np.sqrt(1+ self.beta)
+        while right - left > 1e-10:
+            mid = (left + right) / 2
+            if evaluate_polynomial(polynomial, mid) == 0:
+                return mid
+            if evaluate_polynomial(polynomial, mid) > 0:
+                # middle is still larger than zero, so this is an upper bound
+                right = mid
+            else:
+                left = mid
+        return (left + right) / 2
+
+def evaluate_polynomial(polynomial, x):
+    return sum(coeff * (x ** idx) for idx, coeff in enumerate(polynomial))
 
 
 if __name__ == "__main__":

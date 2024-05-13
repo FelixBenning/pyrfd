@@ -57,6 +57,7 @@ PROBLEMS = {
         "loss": F.nll_loss,
         "batch_size": 1024,
         "seed": 42,
+        "tol": 0.3,
         "trainer_params": {
             "max_epochs": 30,
             "log_every_n_steps": 1,
@@ -68,25 +69,37 @@ PROBLEMS = {
         "loss": nn.CrossEntropyLoss(label_smoothing=0),
         "batch_size": 1024,
         "seed": 42,
+        "tol": 0.2,
         "trainer_params": {
             "max_epochs": 50,
-            "log_every_n_steps": 1,
+            "log_every_n_steps": 5,
         }
     },
 }
 
 def main():
-    problem = PROBLEMS["CIFAR100_resnet18"]
+    problem = PROBLEMS["MNIST_CNN7"]
 
     # fit covariance model
     data: L.LightningDataModule = problem["dataset"](batch_size=problem["batch_size"])
     data.prepare_data()
     data.setup("fit")
-    covariance_model = covariance.SquaredExponential()
+
+    # covariance_model = covariance.SquaredExponential()
+    # covariance_model.auto_fit(
+    #     model_factory=problem["model"],
+    #     loss=problem["loss"],
+    #     data=data.data_train,
+    #     tol=problem['tol'],
+    #     cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
+    # )
+
+    covariance_model = covariance.RationalQuadratic(beta=0.1)
     covariance_model.auto_fit(
         model_factory=problem["model"],
-        loss=F.nll_loss,
+        loss=problem["loss"],
         data=data.data_train,
+        tol=problem['tol'],
         cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
     )
     # ------
