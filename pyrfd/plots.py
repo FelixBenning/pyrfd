@@ -51,7 +51,7 @@ def plot_loss(ax, df: pd.DataFrame, *, mean, var_reg: ScalarRegression):
     )
 
     # 95% - confidence interval (with Gaussian assumption)
-    var_estimates = var_reg.predict(b_size_inv.to_numpy().reshape(-1, 1))
+    var_estimates = var_reg(b_size_inv)
     ax.fill_between(
         x=b_size_inv,
         y1=mean + stats.norm.ppf(0.025) * np.sqrt(var_estimates),
@@ -126,7 +126,7 @@ def plot_squared_losses(ax, df: pd.DataFrame, *, mean, var_reg):
     )
 
     # variance regression
-    var_estimates = var_reg.predict(b_size_inv.to_numpy().reshape(-1, 1))
+    var_estimates = var_reg(b_size_inv)
     ax.plot(
         b_size_inv,
         var_estimates,
@@ -210,7 +210,7 @@ def plot_gradient_norms(ax, df: pd.DataFrame, *, g_var_reg: ScalarRegression, di
     )
 
     # holistic squared gradient norms
-    sq_norm_means = g_var_reg.predict(b_size_inv.to_numpy().reshape(-1, 1))
+    sq_norm_means = g_var_reg(b_size_inv)
     ax.plot(
         b_size_inv,
         sq_norm_means,
