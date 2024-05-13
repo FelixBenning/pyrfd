@@ -83,6 +83,7 @@ def qq_plot_losses(ax, df: pd.DataFrame, *, batch_sizes=None):
         if idx % 2 == 1:  # regression line
             line.set_linestyle("--")
 
+    ax.set_title("")
     ax.set_xlabel("")
     ax.legend()
 
@@ -255,5 +256,4 @@ def qq_plot_sq_gradient_norms(ax, df: pd.DataFrame, *, dims, batch_sizes=None):
             line.set_linestyle("--")
 
     ax.set_title("")
-    ax.set_xlabel("")
     ax.legend()
