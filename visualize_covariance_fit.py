@@ -2,11 +2,21 @@ from numpy import repeat
 import torch.nn.functional as F
 import pandas as pd
 
+from matplotlib import rc
+import matplotlib.pyplot as plt
+
 from benchmarking.classification.mnist.models import CNN7
 from benchmarking.classification.mnist.data import MNIST
 from pyrfd import sampling, covariance
 
+rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
+plt.rcParams.update({
+    'text.usetex': True,
+    'text.latex.preamble': r'\usepackage{amsfonts}'
+})
+
 mnist = MNIST(batch_size=100)
+mnist.prepare_data()
 mnist.setup("fit")
 
 cov_model = covariance.IsotropicCovariance()
@@ -36,3 +46,4 @@ cov_model.fit(sampler.snapshot_as_dataframe())
     sampler.snapshot_as_dataframe(),
     batch_sizes=[10,100,1000]
 )
+plt.show()
