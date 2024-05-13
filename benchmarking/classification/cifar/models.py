@@ -6,7 +6,7 @@ class Resnet18(nn.Module):
     """ Resnet18 model for CIFAR-100 (modifactions based on FOB benchmark) """
     def __init__(self):
         super().__init__()
-        self.model = resnet18(num_classes=100, pretrained=False)
+        self.model = resnet18(num_classes=100, weights=None)
         # 7x7 conv is too large for 32x32 images
         self.model.conv1 = nn.Conv2d(
             in_channels=3, # rgb color

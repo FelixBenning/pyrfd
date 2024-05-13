@@ -27,6 +27,16 @@ class MNIST(L.LightningDataModule):
             ]
         )
 
+        # # Possible data augmentation
+        # self.train_transform = transforms.Compose(
+        #     [
+        #         transforms.RandomRotation(20),
+        #         transforms.RandomAffine(0, translate=(0.2, 0.2)),
+        #         self.transform,
+        #     ]
+        # )
+
+
     def prepare_data(self):
         # download
         MNISTDataset(self.data_dir, train=True, download=True)

@@ -7,9 +7,9 @@ import lightning as L
 
 
 class CIFAR100(L.LightningDataModule):
-    """Represents the CIFAR10 dataset."""
+    """Represents the CIFAR100 dataset."""
 
-    def __init__(self, data_dir: str = " ./data", batch_size: int = 100) -> None:
+    def __init__(self, data_dir: str = "./data/CIFAR", batch_size: int = 100) -> None:
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
