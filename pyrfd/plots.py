@@ -6,6 +6,16 @@ from scipy import stats
 
 from .regression import ScalarRegression
 
+def selection(sorted_list, num_elts):
+    """
+    return a selection of num_elts from the sorted_list (evenly spaced in the index)
+    always includes the first and last index
+    """
+    if len(sorted_list) < num_elts:
+        return sorted_list
+    idxs = np.round(np.linspace(0, len(sorted_list) - 1, num_elts)).astype(int)
+    return sorted_list[idxs]
+
 
 def plot_loss(ax, df: pd.DataFrame, *, mean, var_reg: ScalarRegression):
     """

@@ -39,17 +39,6 @@ class ScalarRegression(LinearRegression):
         return self.intercept_
 
 
-def selection(sorted_list, num_elts):
-    """
-    return a selection of num_elts from the sorted_list (evenly spaced in the index)
-    always includes the first and last index
-    """
-    if len(sorted_list) < num_elts:
-        return sorted_list
-    idxs = np.round(np.linspace(0, len(sorted_list) - 1, num_elts)).astype(int)
-    return sorted_list[idxs]
-
-
 def fit_mean_var(
     batch_sizes: np.array,
     batch_losses: np.array,
