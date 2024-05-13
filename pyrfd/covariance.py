@@ -374,11 +374,10 @@ class RationalQuadratic(IsotropicCovariance):
 
     def __init__(self, *, beta, **kwargs):
         self.beta = beta
-        super().__init__(**kwargs) # calls _is_fitted, beta needs to be there
+        super().__init__(**kwargs)  # calls _is_fitted, beta needs to be there
 
     def _is_fitted(self):
         return super()._is_fitted() and self.beta is not None
-
 
     def __repr__(self) -> str:
         return (
@@ -426,17 +425,15 @@ class RationalQuadratic(IsotropicCovariance):
         polynomial = [-1, tmp, (1 + self.beta), tmp]
         # careful opposite order than np.root expects!
 
-        minimum = self.bisection_root_finder(polynomial) # confer paper for uniqueness
+        minimum = self.bisection_root_finder(polynomial)  # confer paper for uniqueness
 
         # learning rate, not step size!
         return self.scale * np.sqrt(self.beta) * minimum / grad_norm
 
-
-
     def bisection_root_finder(self, polynomial):
-        """ find the root of an increasing polynomial on the interval [0, 1/sqrt(1+beta)] """
+        """find the root of an increasing polynomial on the interval [0, 1/sqrt(1+beta)]"""
         left = 0
-        right = 1/ np.sqrt(1+ self.beta)
+        right = 1 / np.sqrt(1 + self.beta)
         while right - left > 1e-10:
             mid = (left + right) / 2
             if evaluate_polynomial(polynomial, mid) == 0:
@@ -448,8 +445,9 @@ class RationalQuadratic(IsotropicCovariance):
                 left = mid
         return (left + right) / 2
 
+
 def evaluate_polynomial(polynomial, x):
-    return sum(coeff * (x ** idx) for idx, coeff in enumerate(polynomial))
+    return sum(coeff * (x**idx) for idx, coeff in enumerate(polynomial))
 
 
 if __name__ == "__main__":
