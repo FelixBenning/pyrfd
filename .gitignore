@@ -164,7 +164,7 @@ cython_debug/
 
 
 # Caches
-cache/*
+# cache/*
 logs/*
 data/*
 slurm-*
