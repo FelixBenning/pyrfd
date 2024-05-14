@@ -72,9 +72,9 @@ def fit_mean_var(
         centered_squares = (batch_losses - mu) ** 2
 
         old_intercept = var_reg.intercept
-        # fourth moments i.e. 3*sigma^4 = 3 * var^2 are the variance of the centered
+        # 2*sigma^4 = 2 * var^2 is the variance of the centered
         # squares, the weights should be 1/these variances
-        # (we leave out the 3 as it does not change the relative weights)
+        # (we leave out the 2 as it does not change the relative weights)
         var_reg.fit(
             b_inv.reshape(-1, 1),
             centered_squares,
@@ -105,8 +105,7 @@ def isotropic_derivative_var_estimation(
     An existing regression can be passed to act as a starting point
     for the bootstrap.
     """
-    batch_sizes = np.array(batch_sizes)
-    b_inv: np.array = 1 / batch_sizes
+    b_inv: np.array = 1 / np.asarray(batch_sizes)
 
     if g_var_reg is None:
         g_var_reg = ScalarRegression(intercept=0, slope=1)
@@ -119,7 +118,7 @@ def isotropic_derivative_var_estimation(
         variances: np.array = g_var_reg(b_inv)  # variances at batchsize 1/b
 
         # squared grad norms are already (iid) sums of squared Gaussians
-        # variance of squares is 3Var^2 but the 3 does not matter as it cancels
+        # variance of squares is 2Var^2 but the 2 does not matter as it cancels
         # out in the weighting we also have a sum of squares (norm), but this
         # also only results in a constant which does not matter
         old_bias = g_var_reg.intercept
@@ -134,3 +133,11 @@ def isotropic_derivative_var_estimation(
 
     warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
     return g_var_reg
+
+
+# def empirical_dim(batch_sizes, sq_grad_norms, g_var_reg):
+#     df = pd.DataFrame({"batch_sizes":batch_sizes, "sq_grad_norms":sq_grad_norms})
+#     filtered_df = df[df["batch_sizes"] >= 1]
+#     fourth_mom = filtered_df["sq_grad_norms"] ** 2
+#     var_b = 3 * (g_var_reg(1 / np.asarray(filtered_df["batch_sizes"]))**2)
+#     return 1/np.average(fourth_mom/var_b)
