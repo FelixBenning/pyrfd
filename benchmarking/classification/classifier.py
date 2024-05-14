@@ -71,11 +71,9 @@ class Classifier(L.LightningModule):
         return self.optimizer(self.parameters(), **self.hyperparemeters)
 
     def on_after_backward(self) -> None:
-        dot_prod = torch.sum(
-            [
-                torch.dot(p.grad.detach().flatten(), p.detach().flatten())
-                for p in self.parameters()
-            ]
+        dot_prod = sum(
+            torch.dot(p.grad.detach().flatten(), p.detach().flatten())
+            for p in self.parameters()
         )
         self.log("dot(grad,param)", dot_prod)
 
