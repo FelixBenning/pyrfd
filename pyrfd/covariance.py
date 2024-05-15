@@ -188,7 +188,7 @@ class IsotropicCovariance:
 
     def plot_sanity_checks(self, df: pd.DataFrame, batch_sizes=None):
         """Plot Sanity Check Plots"""
-        fig, axs = plt.subplots(3, 2)
+        fig, axs = plt.subplots(3, 2, figsize=(9, 8))
 
         plots.plot_loss(axs[0, 0], df, mean=self.mean, var_reg=self.var_reg)
         axs[0, 0].set_xscale("log")
