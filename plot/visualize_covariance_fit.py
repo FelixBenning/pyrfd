@@ -42,6 +42,9 @@ if len(sampler) == 0:
 
 cov_model.dims = sampler.dims
 cov_model.fit(sampler.snapshot_as_dataframe())
+
+print(f"asymptotic lr={cov_model.asymptotic_learning_rate()}")
+
 (fig, axs) = cov_model.plot_sanity_checks(
     sampler.snapshot_as_dataframe(),
     batch_sizes=[10,100,1000]
