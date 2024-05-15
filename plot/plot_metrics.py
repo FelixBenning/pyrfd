@@ -46,7 +46,7 @@ def legend_name(hyper_params, plot_filter):
         if "excludes" in reqs:
             if not all(x not in hyper_params for x in reqs["excludes"]):
                 continue
-        
+
         return name
 
     return None
@@ -55,15 +55,7 @@ def legend_name(hyper_params, plot_filter):
 def extract_metrics(problem_dir, plot_filter):
     metrics = []
     for optimizer in problem_dir.glob("*"):
-        optimizer_name = optimizer.name.split("(")[0]
-        if not optimizer_name in plot_filter:
-            continue
-
-        start = optimizer.name.find("(")
-        stop = optimizer.name.rfind(")")
-        hyper_params = optimizer.name[start + 1 : stop]
-
-        name = legend_name(hyper_params, plot_filter[optimizer_name])
+        name = legend_name(optimizer.name, plot_filter)
         if name is None:
             continue
 
@@ -71,34 +63,43 @@ def extract_metrics(problem_dir, plot_filter):
             [latest_metrics(seed_dir) for seed_dir in optimizer.glob("seed=*")]
         )
         metrics.append({"name": name, "metrics": df})
+
+    metrics.sort(key=lambda x: x["name"])
     return metrics
 
 
 # fmt: off
 PLOT_FILTER = {
-    "RFD": {
-        "RFD(SqEx)": {
-            "includes": ["SquaredExponential"],
-            "excludes": ["b_size_inv"],
-        },
-        "RFD(RatQ(beta=1))": {
-            "includes": ["RationalQuadratic", "beta=1"],
-        },
+    "RFD(SqEx)": {
+        "includes": ["RFD", "SquaredExponential"],
+        "excludes": ["b_size_inv"],
     },
-    "Adam": {
-        "Adam(untuned)": {"includes": ["lr=0.001"]}
+    "RFD(RatQ(beta=1))": {
+        "includes": ["RFD", "RationalQuadratic", "beta=1"],
     },
-    "SGD": {
-        "SGD(untuned)": {
-            "includes": ["lr=0.001"],
-        },
-        # "A-RFD": {"includes": ["lr=14.2"]},
+    "Adam(untuned)": {
+        "includes": ["Adam", "lr=0.001"],
+    },
+    "SGD(untuned)": {
+        "includes": ["SGD", "lr=0.001"],
+    },
+    "A-RFD": {
+        "includes": ["SGD", "lr=14.2"],
     },
 }
 # fmt: on
+def plot_filter(wanted="all"):
+    if wanted == "all":
+        return PLOT_FILTER
+    
+    return {key: val for key, val in PLOT_FILTER.items() if key in wanted}
 
 
-def plot_metric(ax, metrics, metric, epoch=False):
+def plot_metric(ax, metrics, metric, epoch=False, idx=None):
+    plot_kwargs= {}
+    if idx is not None:
+        plot_kwargs["color"] = f"C{idx}"
+    
     time = "epoch" if epoch else "step"
     df = metrics["metrics"]
     reduced_df = df[[time, metric, "seed"]].dropna()
@@ -113,7 +114,7 @@ def plot_metric(ax, metrics, metric, epoch=False):
         pd.NamedAgg("q0.9", lambda x: x.quantile(0.9)),
     ]})[metric]
     # fmt: on
-    (line,) = ax.plot(agg_df.index, agg_df["mean"], label=metrics["name"])
+    (line,) = ax.plot(agg_df.index, agg_df["mean"], label=metrics["name"], **plot_kwargs)
     ax.fill_between(agg_df.index, agg_df["q0.1"], agg_df["q0.9"], alpha=0.3)
 
     # seed_grouped_df = reduced_df.groupby("seed")
@@ -122,54 +123,103 @@ def plot_metric(ax, metrics, metric, epoch=False):
     #     ax.plot(seed_df["epoch"], seed_df[metric], alpha=0.2, color=line.get_color())
 
 
-def plot_validation_loss(ax, metrics):
-    plot_metric(ax, metrics, "val/loss", epoch=True)
+def plot_validation_loss(ax, metrics, **kwargs):
+    plot_metric(ax, metrics, "val/loss", epoch=True, **kwargs)
     ax.legend()
     ax.set_title("Validation Loss")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
     ax.set_yscale("log")
 
-def plot_accuracy(ax, metrics):
-    plot_metric(ax, metrics, "val/accuracy", epoch=True)
+
+def plot_accuracy(ax, metrics, **kwargs):
+    plot_metric(ax, metrics, "val/accuracy", epoch=True, **kwargs)
     ax.legend()
     ax.set_title("Validation Accuracy")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Accuracy")
 
-def plot_learning_rate(ax, metrics):
-    plot_metric(ax, metrics, "learning_rate", epoch=False)
+
+def plot_initial_learning_rate(ax, metrics, **kwargs):
+    df = metrics["metrics"]
+    plot_learning_rate(ax, {"name": metrics["name"], "metrics": df[df["step"] < 100]}, **kwargs)
+
+
+def plot_learning_rate(ax, metrics, **kwargs):
+    plot_metric(ax, metrics, "learning_rate", epoch=False, **kwargs)
     ax.legend()
     ax.set_title("Learning Rate")
     ax.set_xlabel("Step")
     ax.set_ylabel("Learning Rate")
 
-def plot_step_size(ax, metrics):
-    plot_metric(ax, metrics, "step_size", epoch=False)
+
+def plot_step_size(ax, metrics, **kwargs):
+    plot_metric(ax, metrics, "step_size", epoch=False, **kwargs)
     ax.legend()
     ax.set_title("Step Size")
     ax.set_xlabel("Step")
+    ax.set_yscale("log")
 
+def plot_dot_grad_param(ax, metrics, **kwargs):
+    plot_metric(ax, metrics, "dot(grad,param)", epoch=False, **kwargs)
+    ax.set_title("dot(grad,param)")
+    ax.set_xlabel("Step")
+    ax.legend()
+
+def plot_initial_dot_grad_param(ax, metrics, **kwargs):
+    df = metrics["metrics"]
+    plot_dot_grad_param(ax, {"name": metrics["name"], "metrics": df[df["step"] < 100]}, **kwargs)
+
+def plot_param_norm(ax, metrics, **kwargs):
+    plot_metric(ax, metrics, "param_size", epoch=False, **kwargs)
+    ax.set_title("Parameter Norm")
+    ax.set_xlabel("Step")
+    ax.set_yscale("log")
+    ax.legend()
 
 def plot_performance(problem):
     problem_dir = Path(f"logs/{problem}")
     metrics = extract_metrics(problem_dir, PLOT_FILTER)
-    (fig, axs) = plt.subplots(2, 2, figsize=(8, 6))
-    for item in metrics:
-        plot_validation_loss(axs[0, 0], item)
-        plot_accuracy(axs[0, 1], item)
-        plot_learning_rate(axs[1, 0], item)
-        plot_step_size(axs[1, 1], item)
-
-
+    (fig, axs) = plt.subplots(2, 2, figsize=(10, 6))
+    for (idx, item) in enumerate(metrics):
+        plot_validation_loss(axs[0, 0], item, idx=idx)
+        plot_accuracy(axs[0, 1], item, idx=idx)
+        plot_initial_learning_rate(axs[1, 0], item, idx=idx)
+        if not item["name"] == "A-RFD":
+            plot_step_size(axs[1, 1], item, idx=idx)
 
     fig.tight_layout()
-    plt.savefig(f"plot/{problem}.pdf")
+    plt.savefig(f"plot/{problem}_performance.pdf")
 
+
+def plot_step_behavior(problem):
+    problem_dir = Path(f"logs/{problem}")
+    wanted = ["RFD(SqEx)", "RFD(RatQ(beta=1))", "A-RFD"]
+    metrics = extract_metrics(problem_dir, plot_filter(wanted))
+    (fig, axs) = plt.subplots(3, 2, figsize=(7, 12))
+    for (idx, item) in enumerate(metrics):
+        plot_learning_rate(axs[0, 0], item, idx=idx)
+        plot_initial_learning_rate(axs[1, 0], item, idx=idx)
+        plot_step_size(axs[2, 0], item, idx=idx)
+        plot_dot_grad_param(axs[0, 1], item, idx=idx)
+        plot_initial_dot_grad_param(axs[1, 1], item, idx=idx)
+        # if not item["name"] == "A-RFD":
+        plot_param_norm(axs[2, 1], item, idx=idx)
+
+    metrics = extract_metrics(problem_dir, plot_filter(["Adam(untuned)", "SGD(untuned)"]))
+    for (idx, item) in enumerate(metrics, start=3):
+        plot_step_size(axs[2, 0], item, idx=idx)
+        plot_dot_grad_param(axs[0, 1], item, idx=idx)
+        plot_initial_dot_grad_param(axs[1, 1], item, idx=idx)
+        plot_param_norm(axs[2, 1], item, idx=idx)
+    
+    fig.tight_layout()
+    plt.savefig(f"plot/{problem}_steps.pdf")
 
 def main():
     for problem in PROBLEMS:
-        plot_performance(problem)
+        # plot_performance(problem)
+        plot_step_behavior(problem)
 
 
 if __name__ == "__main__":
