@@ -23,6 +23,7 @@ class RFD(Optimizer):
         momentum=0,
         lr=1,
         b_size_inv=0,
+        norm_lock=False,
     ):
         defaults = {
             "cov": covariance_model,
@@ -31,7 +32,9 @@ class RFD(Optimizer):
             # but this name ensures compatibility with schedulers
             "learning_rate": None,
             "b_size_inv": b_size_inv,
+            "norm_lock": norm_lock,
         }
+
         super().__init__(params, defaults)
 
     def step(self, closure):  # pylint: disable=locally-disabled, signature-differs
@@ -42,6 +45,7 @@ class RFD(Optimizer):
                 and returns the loss.
         """
         loss = None
+
         with torch.enable_grad():
             loss = closure()
             # we assume here, that the person using the optimizer has used
@@ -49,7 +53,6 @@ class RFD(Optimizer):
             # autograd to build a tree which we can
 
         with torch.no_grad():
-
             for group in self.param_groups:
                 grads = [
                     param.grad.detach().flatten()
@@ -61,6 +64,7 @@ class RFD(Optimizer):
                 momentum = group["momentum"]
                 lr_multiplier = group["lr"]
                 b_size_inv = group["b_size_inv"]
+                norm_lock = group["norm_lock"]
 
                 cov_model: IsotropicCovariance = group["cov"]
                 learning_rate = lr_multiplier * cov_model.learning_rate(
@@ -68,6 +72,7 @@ class RFD(Optimizer):
                 )
                 group["learning_rate"] = learning_rate
 
+                param: torch.Tensor
                 for param in group["params"]:
                     state = self.state[param]
                     if param.grad is not None:
@@ -79,8 +84,16 @@ class RFD(Optimizer):
                         else:
                             velocity = torch.mul(param.grad, -1)
 
+                        if norm_lock:
+                            param_norm = param.norm()
+
                         # add velocity to parameters in-place!
                         param += learning_rate * velocity
+
+                        if norm_lock:
+                            # project back to the original sphere
+                            param.mul_(param_norm / param.norm())
+
                         state["velocity"] = velocity
 
         return loss
