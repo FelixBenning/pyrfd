@@ -49,4 +49,6 @@ print(f"asymptotic lr={cov_model.asymptotic_learning_rate()}")
     sampler.snapshot_as_dataframe(),
     batch_sizes=[10,100,1000]
 )
+fig.tight_layout()
+plt.savefig("plot/covariance_fit.pdf")
 plt.show()
