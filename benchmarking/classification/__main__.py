@@ -76,7 +76,7 @@ PROBLEMS = {
 }
 
 def main():
-    problem = PROBLEMS["CIFAR100_resnet18"]
+    problem = PROBLEMS["MNIST_CNN7"]
 
     # fit covariance model
     data: L.LightningDataModule = problem["dataset"](batch_size=problem["batch_size"])
@@ -101,7 +101,7 @@ def main():
         cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
     )
 
-    for seed in range(20):
+    for seed in range(7,20):
         problem["seed"] = seed
         train(
             problem,
