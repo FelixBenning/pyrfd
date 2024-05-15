@@ -1,7 +1,5 @@
 """ Benchmarking RFD """
 
-from typing import Dict, Any
-
 from torch import optim, nn
 import torch.nn.functional as F
 import lightning as L
@@ -69,7 +67,7 @@ PROBLEMS = {
         "loss": nn.CrossEntropyLoss(label_smoothing=0),
         "batch_size": 1024,
         "seed": 42,
-        "tol": 0.2,
+        "tol": 0.29,
         "trainer_params": {
             "max_epochs": 50,
             "log_every_n_steps": 5,
@@ -78,66 +76,81 @@ PROBLEMS = {
 }
 
 def main():
-    problem = PROBLEMS["MNIST_CNN7"]
+    problem = PROBLEMS["CIFAR100_resnet18"]
 
     # fit covariance model
     data: L.LightningDataModule = problem["dataset"](batch_size=problem["batch_size"])
     data.prepare_data()
     data.setup("fit")
 
-    # covariance_model = covariance.SquaredExponential()
-    # covariance_model.auto_fit(
-    #     model_factory=problem["model"],
-    #     loss=problem["loss"],
-    #     data=data.data_train,
-    #     tol=problem['tol'],
-    #     cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
-    # )
-
-    covariance_model = covariance.RationalQuadratic(beta=0.1)
-    covariance_model.auto_fit(
+    sq_exp_cov_model = covariance.SquaredExponential()
+    sq_exp_cov_model.auto_fit(
         model_factory=problem["model"],
         loss=problem["loss"],
         data=data.data_train,
         tol=problem['tol'],
         cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
     )
-    # ------
 
-    train(
-        problem,
-        opt=RFD,
-        hyperparameters={
-            "covariance_model": covariance_model,
-        }
+    rat_quad_cov_model = covariance.RationalQuadratic(beta=1)
+    rat_quad_cov_model.auto_fit(
+        model_factory=problem["model"],
+        loss=problem["loss"],
+        data=data.data_train,
+        tol=problem['tol'],
+        cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
     )
 
-    train(
-        problem,
-        opt=RFD,
-        hyperparameters={
-            "covariance_model": covariance_model,
-            "b_size_inv": 1/problem["batch_size"],
-        }
-    )
+    for seed in range(20):
+        problem["seed"] = seed
+        train(
+            problem,
+            opt=RFD,
+            hyperparameters={
+                "covariance_model": sq_exp_cov_model,
+            }
+        )
 
-    train(
-        problem,
-        opt=optim.SGD,
-        hyperparameters={
-            "lr": 1e-3,
-            "momentum": 0,
-        },
-    )
+        train(
+            problem,
+            opt=RFD,
+            hyperparameters={
+                "covariance_model": rat_quad_cov_model,
+            }
+        )
 
-    train(
-        problem,
-        opt=optim.Adam,
-        hyperparameters={
-            "lr": 1e-3,
-            "betas": (0.9, 0.999),
-        },
-    )
+        train(
+            problem,
+            opt=RFD,
+            hyperparameters={
+                "covariance_model": sq_exp_cov_model,
+                "b_size_inv": 1/problem["batch_size"],
+            }
+        )
+
+        train(
+            problem,
+            opt=optim.SGD,
+            hyperparameters={
+                "lr": 1e-3
+            },
+        )
+        train(
+            problem,
+            opt=optim.SGD,
+            hyperparameters={
+                "lr": sq_exp_cov_model.asymptotic_learning_rate()
+            },
+        )
+
+        train(
+            problem,
+            opt=optim.Adam,
+            hyperparameters={
+                "lr": 1e-3,
+                "betas": (0.9, 0.999),
+            },
+        )
 
 
 if __name__ == "__main__":

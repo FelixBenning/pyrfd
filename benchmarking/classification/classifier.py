@@ -20,8 +20,8 @@ class Classifier(L.LightningModule):
         self.model = model
         self.loss = loss
         self.hyperparemeters = hyperameters
-        self.save_hyperparameters(ignore=["model", "optimizer" ])
-
+        self.current_grad_norm = 0
+        self.save_hyperparameters(ignore=["model", "optimizer"])
 
     # pylint: disable=arguments-differ
     def training_step(self, batch, *args, **kwargs):
@@ -70,6 +70,18 @@ class Classifier(L.LightningModule):
     def configure_optimizers(self):
         return self.optimizer(self.parameters(), **self.hyperparemeters)
 
+    def on_after_backward(self) -> None:
+        dot_prod = sum(
+            torch.dot(p.grad.detach().flatten(), p.detach().flatten())
+            for p in self.parameters()
+        )
+        self.log("dot(grad,param)", dot_prod)
+
+        self.current_grad_norm = torch.cat(
+            [p.grad.detach().flatten() for p in self.parameters()]
+        ).norm()
+        self.log("grad_norm", self.current_grad_norm)
+
     def optimizer_step(
         self,
         epoch: int,
@@ -80,12 +92,14 @@ class Classifier(L.LightningModule):
         # do the default optimizer step
         optimizer.step(closure=optimizer_closure)
 
+        self.log(
+            "param_size",
+            torch.cat([p.detach().flatten() for p in self.parameters()]).norm(),
+        )
+
         # log the learning rate
         if len(optimizer.param_groups) <= 1:
             pg = optimizer.param_groups[0]
             learning_rate = pg.get("learning_rate", pg["lr"])
             self.log("learning_rate", learning_rate)
-        else:
-            for idx, pg in enumerate(optimizer.param_groups):
-                learning_rate = pg.get("learning_rate", pg["lr"])
-                self.log(f"learning_rate_{idx}", learning_rate, on_step=True)
+            self.log("step_size", learning_rate * self.current_grad_norm)
