@@ -166,6 +166,7 @@ cython_debug/
 # Caches
 # cache/*
 logs/*
+!logs/MNIST_CNN7_b=1024
 data/*
 slurm-*
 wandb
