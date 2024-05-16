@@ -50,5 +50,5 @@ print(f"asymptotic lr={cov_model.asymptotic_learning_rate()}")
     batch_sizes=[10,100,1000]
 )
 fig.tight_layout()
-plt.savefig("plot/covariance_fit.pdf")
+plt.savefig("plot/MNIST_CNN7_covariance_fit.pdf")
 plt.show()
