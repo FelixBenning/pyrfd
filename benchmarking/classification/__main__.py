@@ -3,6 +3,7 @@
 from torch import optim, nn
 import torch.nn.functional as F
 import lightning as L
+import sys
 
 from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 
@@ -75,7 +76,7 @@ PROBLEMS = {
     },
 }
 
-def main():
+def main(opt):
     problem = PROBLEMS["MNIST_CNN7"]
 
     # fit covariance model
@@ -92,66 +93,93 @@ def main():
         cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
     )
 
-    rat_quad_cov_model = covariance.RationalQuadratic(beta=1)
-    rat_quad_cov_model.auto_fit(
-        model_factory=problem["model"],
-        loss=problem["loss"],
-        data=data.data_train,
-        tol=problem['tol'],
-        cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
-    )
+    # rat_quad_cov_model = covariance.RationalQuadratic(beta=1)
+    # rat_quad_cov_model.auto_fit(
+    #     model_factory=problem["model"],
+    #     loss=problem["loss"],
+    #     data=data.data_train,
+    #     tol=problem['tol'],
+    #     cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
+    # )
+    if opt == "Adam":
+        for seed in range(0,20):
+            problem["seed"] = seed
+            train(
+                problem,
+                opt=optim.Adam,
+                hyperparameters={
+                    "lr": 1e-4,
+                    "betas": (0.9, 0.999),
+                },
+            )
+            train(
+                problem,
+                opt=optim.Adam,
+                hyperparameters={
+                    "lr": 0.01,
+                    "betas": (0.9, 0.999),
+                },
+            )
+            train(
+                problem,
+                opt=optim.Adam,
+                hyperparameters={
+                    "lr": 0.1,
+                    "betas": (0.9, 0.999),
+                },
+            )
+            train(
+                problem,
+                opt=optim.Adam,
+                hyperparameters={
+                    "lr": 1,
+                    "betas": (0.9, 0.999),
+                },
+            )
 
-    for seed in range(7,20):
-        problem["seed"] = seed
-        train(
-            problem,
-            opt=RFD,
-            hyperparameters={
-                "covariance_model": sq_exp_cov_model,
-            }
-        )
+    if opt == "SGD":
+        for seed in range(0,20):
+            problem["seed"] = seed
+            train(
+                problem,
+                opt=optim.SGD,
+                hyperparameters={
+                    "lr": 0.01
+                },
+            )
+            train(
+                problem,
+                opt=optim.SGD,
+                hyperparameters={
+                    "lr": 0.1
+                },
+            )
+            train(
+                problem,
+                opt=optim.SGD,
+                hyperparameters={
+                    "lr": 1
+                },
+            )
+            train(
+                problem,
+                opt=optim.SGD,
+                hyperparameters={
+                    "lr": 5
+                },
+            )
+            train(
+                problem,
+                opt=optim.SGD,
+                hyperparameters={
+                    "lr": 20
+                },
+            )
 
-        train(
-            problem,
-            opt=RFD,
-            hyperparameters={
-                "covariance_model": rat_quad_cov_model,
-            }
-        )
 
-        train(
-            problem,
-            opt=RFD,
-            hyperparameters={
-                "covariance_model": sq_exp_cov_model,
-                "b_size_inv": 1/problem["batch_size"],
-            }
-        )
 
-        train(
-            problem,
-            opt=optim.SGD,
-            hyperparameters={
-                "lr": 1e-3
-            },
-        )
-        train(
-            problem,
-            opt=optim.SGD,
-            hyperparameters={
-                "lr": sq_exp_cov_model.asymptotic_learning_rate()
-            },
-        )
-
-        train(
-            problem,
-            opt=optim.Adam,
-            hyperparameters={
-                "lr": 1e-3,
-                "betas": (0.9, 0.999),
-            },
-        )
 
 
 if __name__ == "__main__":
-    main()
+    sys.argv
+    main(sys.argv[1])
