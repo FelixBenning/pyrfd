@@ -146,7 +146,7 @@ def main(problem_name, opt):
             )
 
     if opt == "Adam":
-        for seed in range(10,20):
+        for seed in range(20):
             problem["seed"] = seed
             train(
                 problem,
@@ -158,7 +158,7 @@ def main(problem_name, opt):
             )
 
     if opt == "SGD":
-        for seed in range(8,20):
+        for seed in range(20):
             problem["seed"] = seed
             train(
                 problem,

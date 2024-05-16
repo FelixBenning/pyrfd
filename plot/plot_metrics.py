@@ -15,7 +15,7 @@ plt.rcParams.update(
     }
 )
 
-PROBLEMS = ["MNIST_CNN7_b=1024"]
+PROBLEMS = ["MNIST_CNN7_b=1024", "MNIST_CNN3_b=128"]
 
 
 def latest_metrics(seed_dir):
