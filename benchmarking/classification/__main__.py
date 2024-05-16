@@ -114,6 +114,18 @@ def main(problem_name, opt):
         cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
     )
 
+    if opt == "cov":
+        for run in range(20):
+            sq_exp_cov_model = covariance.SquaredExponential()
+            sq_exp_cov_model.auto_fit(
+                model_factory=problem["model"],
+                loss=problem["loss"],
+                data=data.data_train,
+                tol=problem['tol'],
+                cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}_run={run}/covariance_cache.csv""",
+            )
+
+
     if opt == "RFD":
         for seed in range(20):
             problem["seed"] = seed
