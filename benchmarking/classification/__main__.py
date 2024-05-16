@@ -50,6 +50,18 @@ def trainer_from_problem(problem, opt_name, hyperparameters):
 
 
 PROBLEMS = {
+    "MNIST_CNN3" : {
+        "dataset": MNIST,
+        "model": CNN3,
+        "loss": F.nll_loss,
+        "batch_size": 128,
+        "seed": 42,
+        "tol": 0.3,
+        "trainer_params": {
+            "max_epochs": 30,
+            "log_every_n_steps": 1,
+        }
+    },
     "MNIST_CNN7" : {
         "dataset": MNIST,
         "model": CNN7,
@@ -76,8 +88,8 @@ PROBLEMS = {
     },
 }
 
-def main(opt):
-    problem = PROBLEMS["MNIST_CNN7"]
+def main(problem_name, opt):
+    problem = PROBLEMS[problem_name]
 
     # fit covariance model
     data: L.LightningDataModule = problem["dataset"](batch_size=problem["batch_size"])
@@ -93,25 +105,37 @@ def main(opt):
         cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
     )
 
-    # rat_quad_cov_model = covariance.RationalQuadratic(beta=1)
-    # rat_quad_cov_model.auto_fit(
-    #     model_factory=problem["model"],
-    #     loss=problem["loss"],
-    #     data=data.data_train,
-    #     tol=problem['tol'],
-    #     cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
-    # )
-    if opt == "Adam":
-        for seed in range(0,20):
+    rat_quad_cov_model = covariance.RationalQuadratic(beta=1)
+    rat_quad_cov_model.auto_fit(
+        model_factory=problem["model"],
+        loss=problem["loss"],
+        data=data.data_train,
+        tol=problem['tol'],
+        cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
+    )
+
+    if opt == "RFD":
+        for seed in range(20):
             problem["seed"] = seed
             train(
                 problem,
-                opt=optim.Adam,
+                opt=RFD,
                 hyperparameters={
-                    "lr": 1e-4,
-                    "betas": (0.9, 0.999),
+                    "covariance_model": sq_exp_cov_model,
                 },
             )
+            train(
+                problem,
+                opt=RFD,
+                hyperparameters={
+                    "covariance_model": sq_exp_cov_model,
+                    "b_size_inv": 1/problem["batch_size"],
+                },
+            )
+
+    if opt == "Adam":
+        for seed in range(10,20):
+            problem["seed"] = seed
             train(
                 problem,
                 opt=optim.Adam,
@@ -120,59 +144,15 @@ def main(opt):
                     "betas": (0.9, 0.999),
                 },
             )
-            train(
-                problem,
-                opt=optim.Adam,
-                hyperparameters={
-                    "lr": 0.1,
-                    "betas": (0.9, 0.999),
-                },
-            )
-            train(
-                problem,
-                opt=optim.Adam,
-                hyperparameters={
-                    "lr": 1,
-                    "betas": (0.9, 0.999),
-                },
-            )
 
     if opt == "SGD":
-        for seed in range(0,20):
+        for seed in range(8,20):
             problem["seed"] = seed
             train(
                 problem,
                 opt=optim.SGD,
                 hyperparameters={
-                    "lr": 0.01
-                },
-            )
-            train(
-                problem,
-                opt=optim.SGD,
-                hyperparameters={
-                    "lr": 0.1
-                },
-            )
-            train(
-                problem,
-                opt=optim.SGD,
-                hyperparameters={
                     "lr": 1
-                },
-            )
-            train(
-                problem,
-                opt=optim.SGD,
-                hyperparameters={
-                    "lr": 5
-                },
-            )
-            train(
-                problem,
-                opt=optim.SGD,
-                hyperparameters={
-                    "lr": 20
                 },
             )
 
@@ -182,4 +162,4 @@ def main(opt):
 
 if __name__ == "__main__":
     sys.argv
-    main(sys.argv[1])
+    main(sys.argv[1], sys.argv[2])
