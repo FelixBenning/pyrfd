@@ -89,40 +89,6 @@ class IsotropicCovariance:
             ")"
         )
 
-    # def __getstate__(self):
-    #     if not self._fitted:
-    #         warning("The covariance model has not been fitted, saving it is pointless")
-    #         return {}
-
-    #     return {
-    #         "mean": self.mean,
-    #         "var_reg": [self.var_reg.intercept_, self.var_reg.coef_[0]],
-    #         "g_var_reg": [self.g_var_reg.intercept_, self.g_var_reg.coef_[0]],
-    #         "dims": self.dims,
-    #     }
-
-    # def __setstate__(self, state):
-    #     if not state:
-    #         return
-
-    #     assert all(
-    #         x > 0 for x in state["var_reg"]
-    #     ), "Negative variances are not meaningful"
-    #     assert all(
-    #         x > 0 for x in state["g_var_reg"]
-    #     ), "Negative variances are not meaningful"
-
-    #     self.mean = state["mean"]
-    #     self.var_reg = ScalarRegression(
-    #         intercept=state["var_reg"][0], slope=state["var_reg"][1]
-    #     )
-    #     self.g_var_reg = ScalarRegression(
-    #         intercept=state["g_var_reg"][0], slope=state["g_var_reg"][1]
-    #     )
-
-    #     self.dims = state["dims"]
-    #     self._fitted = True
-
     @abstractmethod
     def learning_rate(self, loss, grad_norm, b_size_inv=0):
         """learning rate of this covariance model from the RFD paper"""
@@ -214,7 +180,7 @@ class IsotropicCovariance:
 
         return (fig, axs)
 
-    # pylint: disable=too-many-arguments
+    # pylint: disable=too-many-arguments,too-many-locals
     def auto_fit(
         self,
         model_factory,
@@ -447,6 +413,11 @@ class RationalQuadratic(IsotropicCovariance):
 
 
 def evaluate_polynomial(polynomial, x):
+    """ evaluate a polynomial at x,
+
+    polynomial is a list of coefficients
+        where the index is the power of x
+    """
     return sum(coeff * (x**idx) for idx, coeff in enumerate(polynomial))
 
 

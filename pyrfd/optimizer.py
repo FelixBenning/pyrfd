@@ -15,6 +15,7 @@ class RFD(Optimizer):
     to the statistically determined step size (i.e. default `1`)
     """
 
+    # pylint: disable=too-many-arguments
     def __init__(
         self,
         params,
@@ -62,13 +63,13 @@ class RFD(Optimizer):
                 grad_norm = torch.cat(grads).norm()
 
                 momentum = group["momentum"]
-                lr_multiplier = group["lr"]
-                b_size_inv = group["b_size_inv"]
                 norm_lock = group["norm_lock"]
 
                 cov_model: IsotropicCovariance = group["cov"]
-                learning_rate = lr_multiplier * cov_model.learning_rate(
-                    loss, grad_norm, b_size_inv=b_size_inv
+                learning_rate = group["lr"] * cov_model.learning_rate(
+                    loss,
+                    grad_norm,
+                    b_size_inv=group["b_size_inv"],
                 )
                 group["learning_rate"] = learning_rate
 

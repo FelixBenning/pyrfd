@@ -6,6 +6,7 @@ from scipy import stats
 
 from .regression import ScalarRegression
 
+
 def selection(sorted_list, num_elts):
     """
     return a selection of num_elts from the sorted_list (evenly spaced in the index)
