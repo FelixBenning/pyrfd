@@ -24,6 +24,7 @@ class RFD(Optimizer):
         momentum=0,
         lr=1,
         b_size_inv=0,
+        conservatism=0,
         norm_lock=False,
     ):
         defaults = {
@@ -34,6 +35,7 @@ class RFD(Optimizer):
             "learning_rate": None,
             "b_size_inv": b_size_inv,
             "norm_lock": norm_lock,
+            "conservatism": conservatism,
         }
 
         super().__init__(params, defaults)
@@ -70,6 +72,7 @@ class RFD(Optimizer):
                     loss,
                     grad_norm,
                     b_size_inv=group["b_size_inv"],
+                    conservatism=group["conservatism"],
                 )
                 group["learning_rate"] = learning_rate
 
