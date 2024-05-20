@@ -86,13 +86,110 @@ class IsotropicCovariance:
             f"variance={var}, "
             f"gradient_var={g_var}, "
             f"dims={self.dims}"
-            ")"
         )
 
     @abstractmethod
-    def learning_rate(self, loss, grad_norm, b_size_inv=0):
-        """learning rate of this covariance model from the RFD paper"""
+    def kernel(self, neg_sq_half):
+        """the kernel of the covariance model as a function of
+            `neg_sq_half = - dist^2/2`
+        where dist is the distance between two points
+        """
         return NotImplemented
+
+    @abstractmethod
+    def diff_kernel(self, neg_sq_half):
+        """the derivative of the kernel of the covariance model as a function of
+            `neg_sq_half = - dist^2/2`
+        where dist is the distance between two points
+        """
+        return NotImplemented
+
+    @abstractmethod
+    def diff2_kernel(self, neg_sq_half):
+        """the second derivative of the kernel of the covariance model as a function of
+            `neg_sq_half = - dist^2/2`
+        where dist is the distance between two points
+        """
+        return NotImplemented
+
+    def cond_expectation(self, stepsize, loss, grad_norm, b_size_inv=0):
+        """the conditional expectation of the cost given batch loss and gradient norm
+        assuming a step in the direction of the negative gradient
+        """
+        neg_sq_half = -(stepsize**2) / 2
+
+        corr = self.kernel(neg_sq_half) / self.var_reg(b_size_inv)
+        g_corr = stepsize * self.diff_kernel(neg_sq_half) / self.g_var_reg(b_size_inv)
+
+        return corr * (loss - self.mean) - g_corr * grad_norm
+
+    def diff_cond_expectation(self, stepsize, loss, grad_norm, b_size_inv=0):
+        """derivative of the conditional expectation of the cost given batch loss and gradient norm
+        assuming a step in the direction of the negative gradient
+        """
+        sq_step = stepsize**2
+        neg_sq_half = -sq_step / 2
+
+        corr = -stepsize * self.diff_kernel(neg_sq_half) / self.var_reg(b_size_inv)
+        g_cov = self.diff_kernel(neg_sq_half) - sq_step * self.diff2_kernel(neg_sq_half)
+        g_corr = g_cov / self.g_var_reg(b_size_inv)
+
+        return corr * (loss - self.mean) - g_corr * grad_norm
+
+    def cond_variance(self, stepsize, b_size_inv=0):
+        """the conditional variance of the cost given batch loss and gradient norm
+        assuming a step in the direction of the negative gradient
+        """
+        sq_step = stepsize**2
+        neg_sq_half = -sq_step / 2
+
+        var = self.var_reg.intercept
+        explained_var_1 = (self.kernel(neg_sq_half) ** 2) / self.var_reg(b_size_inv)
+        explained_var_2 = (
+            sq_step * (self.diff_kernel(neg_sq_half) ** 2) / self.g_var_reg(b_size_inv)
+        )
+        return var - explained_var_1 - explained_var_2
+
+    def diff_cond_variance(self, stepsize, b_size_inv=0):
+        """derivative of the conditional variance of the cost given batch loss and gradient norm
+        assuming a step in the direction of the negative gradient
+        """
+        sq_step = stepsize**2
+        neg_sq_half = -sq_step / 2
+        t1 = stepsize * self.kernel(neg_sq_half) * self.diff_kernel(neg_sq_half)
+        t1 /= self.var_reg(b_size_inv)
+
+        t2 = self.diff_kernel(neg_sq_half) * self.diff2_kernel(neg_sq_half)
+        t2 *= stepsize**3
+        t3 = stepsize * self.diff_kernel(neg_sq_half) ** 2
+        return 2 * (t1 + (t2 - t3) / self.g_var_reg(b_size_inv))
+
+    def learning_rate(self, loss, grad_norm, *, b_size_inv=0, conservatism=0):
+        """learning rate of this covariance model from the RFD paper"""
+
+        if conservatism != 0:
+            regularization = stats.norm.ppf(conservatism / 2 + 0.5)
+
+            def diff_cost(stepsize):
+                cond_var = self.cond_variance(stepsize, b_size_inv=b_size_inv)
+                d_cond_var = self.diff_cond_variance(stepsize, b_size_inv=b_size_inv)
+                reg = regularization * 0.5 * d_cond_var / torch.sqrt(cond_var)
+
+                dce = self.diff_cond_expectation(stepsize, loss, grad_norm, b_size_inv)
+                return dce + reg
+
+        else:
+
+            def diff_cost(stepsize):
+                return self.diff_cond_expectation(stepsize, loss, grad_norm, b_size_inv)
+
+        left = 0  # diff_cost(0) < 0
+        right = next(s for s in [2**x for x in range(-20, 20)] if diff_cost(s) > 0)
+
+        # find minimum
+        stepsize = bisection_incr(diff_cost, left, right)
+
+        return stepsize / grad_norm  # learning rate
 
     def asymptotic_learning_rate(self, b_size_inv=0, limiting_loss=0):
         """asymptotic learning rate of RFD
@@ -309,8 +406,21 @@ class SquaredExponential(IsotropicCovariance):
             "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
         )
 
-    def learning_rate(self, loss, grad_norm, b_size_inv=0):
+    def kernel(self, neg_sq_half):
+        return self.variance * torch.exp(neg_sq_half / (self.scale**2))
+
+    def diff_kernel(self, neg_sq_half):
+        return self.kernel(neg_sq_half) / (self.scale**2)
+
+    def diff2_kernel(self, neg_sq_half):
+        return self.kernel(neg_sq_half) / (self.scale**4)
+
+    def learning_rate(self, loss, grad_norm, *, b_size_inv=0, conservatism=0):
         """RFD learning rate from Random Function Descent paper"""
+        if conservatism != 0:  # Fallback
+            return super().learning_rate(
+                loss, grad_norm, b_size_inv=b_size_inv, conservatism=conservatism
+            )
 
         var_reg = self.var_reg
         g_var_reg = self.g_var_reg
@@ -368,8 +478,27 @@ class RationalQuadratic(IsotropicCovariance):
             "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
         )
 
-    def learning_rate(self, loss, grad_norm, b_size_inv=0):
+    def kernel(self, neg_sq_half):
+        inner = 1 - 2 * neg_sq_half / (self.beta * self.scale**2)
+        return self.variance * (inner ** (-self.beta / 2))
+
+    def diff_kernel(self, neg_sq_half):
+        inner = 1 - 2 * neg_sq_half / (self.beta * self.scale**2)
+        return (self.variance / self.scale**2) * (inner ** (-self.beta / 2 - 1))
+
+    def diff2_kernel(self, neg_sq_half):
+        inner = 1 - 2 * neg_sq_half / (self.beta * self.scale**2)
+
+        tmp = (self.variance / self.scale**4) * (1 + 2 / self.beta)
+        return tmp * (inner ** (-self.beta / 2 - 2))
+
+    def learning_rate(self, loss, grad_norm, *, b_size_inv=0, conservatism=0):
         """RFD learning rate from Random Function Descent paper"""
+        if conservatism != 0:  # Fallback
+            return super().learning_rate(
+                loss, grad_norm, b_size_inv=b_size_inv, conservatism=conservatism
+            )
+
         if grad_norm == 0:  # fast return
             return 0
         if loss >= self.mean:
@@ -384,41 +513,43 @@ class RationalQuadratic(IsotropicCovariance):
         var_adjust = var_reg.intercept / var_reg(b_size_inv)
         var_g_adjust = g_var_reg.intercept / g_var_reg(b_size_inv)
 
-        xi = var_adjust / var_g_adjust * grad_norm / (self.mean - loss)
+        grad_cost_quot = var_adjust / var_g_adjust * grad_norm / (self.mean - loss)
         # -------------------------
 
-        tmp = np.sqrt(self.beta) / (self.scale * xi)
+        tmp = np.sqrt(self.beta) / (self.scale * grad_cost_quot)
         polynomial = [-1, tmp, (1 + self.beta), tmp]
         # careful opposite order than np.root expects!
 
-        minimum = self.bisection_root_finder(polynomial)  # confer paper for uniqueness
+        minimum = bisection_incr(
+            func=lambda x: evaluate_polynomial(polynomial, x),
+            left=0,
+            right=1 / np.sqrt(1 + self.beta),  # confer paper
+        )
 
         # learning rate, not step size!
         return self.scale * np.sqrt(self.beta) * minimum / grad_norm
 
-    def bisection_root_finder(self, polynomial):
-        """find the root of an increasing polynomial on the interval [0, 1/sqrt(1+beta)]"""
-        left = 0
-        right = 1 / np.sqrt(1 + self.beta)
-        while right - left > 1e-10:
-            mid = (left + right) / 2
-            if evaluate_polynomial(polynomial, mid) == 0:
-                return mid
-            if evaluate_polynomial(polynomial, mid) > 0:
-                # middle is still larger than zero, so this is an upper bound
-                right = mid
-            else:
-                left = mid
-        return (left + right) / 2
-
 
 def evaluate_polynomial(polynomial, x):
-    """ evaluate a polynomial at x,
+    """evaluate a polynomial at x,
 
     polynomial is a list of coefficients
         where the index is the power of x
     """
     return sum(coeff * (x**idx) for idx, coeff in enumerate(polynomial))
+
+
+def bisection_incr(func, left, right, tol=1e-10):
+    """find the root of an increasing function on the interval [left, right]"""
+    while right - left > tol:
+        mid = (left + right) / 2
+        if func(mid) == 0:
+            return mid
+        if func(mid) > 0:
+            right = mid
+        else:
+            left = mid
+    return (left + right) / 2
 
 
 if __name__ == "__main__":
