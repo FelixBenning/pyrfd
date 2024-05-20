@@ -3,6 +3,7 @@ Module providing Covariance models to pass to RFD. I.e. they can be fitted
 using loss samples and they provide a learning rate
 """
 
+from __future__ import annotations
 from abc import abstractmethod
 from ctypes import ArgumentError
 from logging import warning
