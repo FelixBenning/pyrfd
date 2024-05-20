@@ -1,4 +1,5 @@
 """ Weighted least squares regression for mean and covariance estimation """
+
 import math
 from logging import warning
 import numpy as np
@@ -25,7 +26,7 @@ class ScalarRegression(LinearRegression):
 
     @property
     def is_plausible_variance_regression(self):
-        """ variances are positive, bool if slope and intercept are postivie """
+        """variances are positive, bool if slope and intercept are postivie"""
         return (self.slope >= 0) and (self.intercept > 0)
 
     @property

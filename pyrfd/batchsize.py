@@ -36,7 +36,7 @@ def empirical_intercept_variance(counts, var_reg):
 
 
 def theoretical_intercept_variance(dist: stats.rv_discrete, var_reg):
-    """ the number of batch size samples n is related to the buget in the
+    """the number of batch size samples n is related to the buget in the
     following way:
         n E[B] < budget
     where B is the random batch size sampled from dist. Thus n = budget/E[B],
@@ -98,12 +98,15 @@ def batchsize_dist(var_reg=None, logging=False):
             )
 
     else:
+
         def callback(_):
             pass
 
     start = time()
     res = optimize.minimize(
-        lambda log_w: theoretical_intercept_variance(gibbs_dist(np.exp(log_w)), var_reg),
+        lambda log_w: theoretical_intercept_variance(
+            gibbs_dist(np.exp(log_w)), var_reg
+        ),
         np.log(weights),
         method="Nelder-Mead",
         callback=callback,
