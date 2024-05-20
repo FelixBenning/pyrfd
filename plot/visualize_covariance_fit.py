@@ -74,7 +74,8 @@ def visualize_lr_variance():
     for run in range(20):
         cov_model = get_run_covariance(run)
         asympt_lr.append(cov_model.asymptotic_learning_rate())
-    
+
+    print(asympt_lr)
     plt.hist(asympt_lr, label="Asymptotic learning rate")
     plt.savefig("plot/MNIST_CNN7_asymptotic_lr.pdf")
 

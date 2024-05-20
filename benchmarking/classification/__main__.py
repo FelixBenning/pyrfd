@@ -96,24 +96,6 @@ def main(problem_name, opt):
     data.prepare_data()
     data.setup("fit")
 
-    sq_exp_cov_model = covariance.SquaredExponential()
-    sq_exp_cov_model.auto_fit(
-        model_factory=problem["model"],
-        loss=problem["loss"],
-        data=data.data_train,
-        tol=problem['tol'],
-        cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
-    )
-
-    rat_quad_cov_model = covariance.RationalQuadratic(beta=1)
-    rat_quad_cov_model.auto_fit(
-        model_factory=problem["model"],
-        loss=problem["loss"],
-        data=data.data_train,
-        tol=problem['tol'],
-        cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
-    )
-
     if opt == "cov":
         for run in range(20):
             sq_exp_cov_model = covariance.SquaredExponential()
@@ -126,7 +108,16 @@ def main(problem_name, opt):
             )
 
 
-    if opt == "RFD":
+    if opt == "RFD-SE":
+        sq_exp_cov_model = covariance.SquaredExponential()
+        sq_exp_cov_model.auto_fit(
+            model_factory=problem["model"],
+            loss=problem["loss"],
+            data=data.data_train,
+            tol=problem['tol'],
+            cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
+        )
+
         for seed in range(20):
             problem["seed"] = seed
             train(
@@ -144,34 +135,54 @@ def main(problem_name, opt):
                     "b_size_inv": 1/problem["batch_size"],
                 },
             )
+    
+    if opt == "RFD-RQ":
+        rat_quad_cov_model = covariance.RationalQuadratic(beta=1)
+        rat_quad_cov_model.auto_fit(
+            model_factory=problem["model"],
+            loss=problem["loss"],
+            data=data.data_train,
+            tol=problem['tol'],
+            cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}/covariance_cache.csv""",
+        )
+        for seed in range(20):
+            problem["seed"] = seed
+            train(
+                problem,
+                opt=RFD,
+                hyperparameters={
+                    "covariance_model": rat_quad_cov_model,
+                },
+            )
 
     if opt == "Adam":
         for seed in range(20):
             problem["seed"] = seed
-            train(
-                problem,
-                opt=optim.Adam,
-                hyperparameters={
-                    "lr": 0.01,
-                    "betas": (0.9, 0.999),
-                },
-            )
+            for lr in [1e-1, 1e-2, 1e-3, 1e-4]:
+                train(
+                    problem,
+                    opt=optim.Adam,
+                    hyperparameters={
+                        "lr": lr,
+                        "betas": (0.9, 0.999),
+                    },
+                )
 
     if opt == "SGD":
         for seed in range(20):
             problem["seed"] = seed
-            train(
-                problem,
-                opt=optim.SGD,
-                hyperparameters={
-                    "lr": 1
-                },
-            )
+            for lr in [1e1, 1e0, 1e-1, 1e-2]:
+                train(
+                    problem,
+                    opt=optim.SGD,
+                    hyperparameters={
+                        "lr": lr
+                    },
+                )
 
 
 
 
 
 if __name__ == "__main__":
-    sys.argv
     main(sys.argv[1], sys.argv[2])

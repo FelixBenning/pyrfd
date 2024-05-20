@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from typing import Callable, Any
+from collections import deque
 
 import torch
 from torch import optim
@@ -20,8 +21,13 @@ class Classifier(L.LightningModule):
         self.model = model
         self.loss = loss
         self.hyperparemeters = hyperameters
-        self.current_grad_norm = 0
         self.save_hyperparameters(ignore=["model", "optimizer"])
+        self.grads = deque(maxlen= self.hyperparemeters.get("grad_log_window", 20))
+        self.steps = deque(maxlen= self.hyperparemeters.get("param_log_window", 20))
+        self.current_params = torch.cat(
+            [p.detach().flatten() for p in self.parameters()]
+        )
+        
 
     # pylint: disable=arguments-differ
     def training_step(self, batch, *args, **kwargs):
@@ -71,17 +77,17 @@ class Classifier(L.LightningModule):
         return self.optimizer(self.parameters(), **self.hyperparemeters)
 
     def on_after_backward(self) -> None:
-        dot_prod = sum(
-            torch.dot(p.grad.detach().flatten(), p.detach().flatten())
-            for p in self.parameters()
-        )
-        self.log("dot(grad,param)", dot_prod)
-
-        self.current_grad_norm = torch.cat(
+        current_grad = torch.cat(
             [p.grad.detach().flatten() for p in self.parameters()]
-        ).norm()
-        self.log("grad_norm", self.current_grad_norm)
+        )
+        self.log("grad_norm", current_grad.norm())
+        self.log("dot(grad,param)", torch.dot(current_grad, self.current_params))
+        for idx, grad in enumerate(self.grads, start=1):
+            self.log(f"dot(grad[n-{idx}], grad[n])", torch.dot(grad, current_grad))
 
+        self.grads.appendleft(current_grad)
+
+    
     def optimizer_step(
         self,
         epoch: int,
@@ -92,14 +98,19 @@ class Classifier(L.LightningModule):
         # do the default optimizer step
         optimizer.step(closure=optimizer_closure)
 
-        self.log(
-            "param_size",
-            torch.cat([p.detach().flatten() for p in self.parameters()]).norm(),
-        )
+        new_params = torch.cat([p.detach().flatten() for p in self.parameters()])
+        self.log("param_norm", new_params.norm())
+
+        current_step = new_params - self.current_params
+        self.current_params = new_params
+        self.log("step_size", torch.norm(current_step))
+        for idx, step in enumerate(self.steps, start=1):
+            self.log(f"dot(step[n-{idx}], step[n])", torch.dot(step, current_step))
+        
+        self.steps.appendleft(current_step)
 
         # log the learning rate
         if len(optimizer.param_groups) <= 1:
             pg = optimizer.param_groups[0]
             learning_rate = pg.get("learning_rate", pg["lr"])
             self.log("learning_rate", learning_rate)
-            self.log("step_size", learning_rate * self.current_grad_norm)
