@@ -10,7 +10,6 @@ from typing import Tuple
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import torch
 from scipy import stats
 from tqdm import tqdm
 
@@ -46,21 +45,20 @@ class IsotropicCovariance:
         gradient_var: Tuple[float, float] | None = None,
         dims=None,
     ) -> None:
-        self.mean = mean
 
-        if variance is None:
-            self.var_reg = None
-        else:
+        self.mean = mean
+        self.dims = dims
+
+        self.var_reg = None
+        self.g_var_reg = None
+
+        if variance is not None:
             self.var_reg = ScalarRegression(*variance)
             assert self.var_reg.is_plausible_variance_regression
 
-        if gradient_var is None:
-            self.g_var_reg = None
-        else:
+        if gradient_var is not None:
             self.g_var_reg = ScalarRegression(*gradient_var)
             assert self.g_var_reg.is_plausible_variance_regression
-
-        self.dims = dims
 
         self._fitted = False
         if self._is_fitted():
@@ -173,7 +171,7 @@ class IsotropicCovariance:
             def diff_cost(stepsize):
                 cond_var = self.cond_variance(stepsize, b_size_inv=b_size_inv)
                 d_cond_var = self.diff_cond_variance(stepsize, b_size_inv=b_size_inv)
-                reg = regularization * 0.5 * d_cond_var / torch.sqrt(cond_var)
+                reg = regularization * 0.5 * d_cond_var / np.sqrt(cond_var)
 
                 dce = self.diff_cond_expectation(stepsize, loss, grad_norm, b_size_inv)
                 return dce + reg
@@ -407,7 +405,7 @@ class SquaredExponential(IsotropicCovariance):
         )
 
     def kernel(self, neg_sq_half):
-        return self.variance * torch.exp(neg_sq_half / (self.scale**2))
+        return self.variance * np.exp(neg_sq_half / (self.scale**2))
 
     def diff_kernel(self, neg_sq_half):
         return self.kernel(neg_sq_half) / (self.scale**2)
@@ -434,7 +432,7 @@ class SquaredExponential(IsotropicCovariance):
         return (
             var_g_adjust
             * (self.scale**2)
-            / (torch.sqrt(tmp**2 + (self.scale * grad_norm * var_g_adjust) ** 2) + tmp)
+            / (np.sqrt(tmp**2 + (self.scale * grad_norm * var_g_adjust) ** 2) + tmp)
         )
 
 

@@ -1,7 +1,11 @@
 import pytest
 from pyrfd.covariance import SquaredExponential
 
-@pytest.mark.parametrize("mean,var,scale", [(1,1,2)])
+@pytest.mark.parametrize("mean,var,scale", [
+    (1,1,2),
+    (0.1,3,10),
+    (10,3,0.5),
+])
 def test_squared_exponential(mean, var, scale):
     cov = SquaredExponential(
         mean=mean,
