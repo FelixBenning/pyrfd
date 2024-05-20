@@ -66,7 +66,7 @@ PROBLEMS = {
         "dataset": MNIST,
         "model": CNN7,
         "loss": F.nll_loss,
-        "batch_size": 1024,
+        "batch_size": 128,
         "seed": 42,
         "tol": 0.3,
         "trainer_params": {
@@ -80,7 +80,7 @@ PROBLEMS = {
         "loss": nn.CrossEntropyLoss(label_smoothing=0),
         "batch_size": 1024,
         "seed": 42,
-        "tol": 0.29,
+        "tol": 0.3,
         "trainer_params": {
             "max_epochs": 50,
             "log_every_n_steps": 5,

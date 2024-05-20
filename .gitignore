@@ -167,6 +167,7 @@ cython_debug/
 # cache/*
 logs/*
 !logs/MNIST_CNN7_b=1024
+!logs/MNIST_CNN7_b=128
 !logs/MNIST_CNN3_b=128
 data/*
 slurm-*
