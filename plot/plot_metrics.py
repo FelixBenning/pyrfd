@@ -5,6 +5,7 @@ import pandas as pd
 
 from matplotlib import rc
 import matplotlib.pyplot as plt
+from sympy import plot
 
 
 rc("font", **{"family": "serif", "serif": ["Computer Modern"]})
@@ -16,9 +17,9 @@ plt.rcParams.update(
 )
 
 PROBLEMS = [
-    "MNIST_CNN7_b=1024",
+    # "MNIST_CNN7_b=1024",
     "MNIST_CNN7_b=128",
-    "MNIST_CNN3_b=128",
+    # "MNIST_CNN3_b=128",
 ]
 
 
@@ -90,7 +91,13 @@ PLOT_FILTER = {
         "includes": ["Adam", "lr=0.01"],
     },
     "SGD(lr=1)": {
-        "includes": ["SGD", "lr=1)"],
+        "includes": ["SGD", "lr=1."],
+    },
+    "SGD(lr=0.1)": {
+        "includes": ["SGD", "lr=0.1"],
+    },
+    "Adam(lr=1e-3)": {
+        "includes": ["Adam", "lr=0.001"],
     },
 }
 # fmt: on
@@ -213,7 +220,10 @@ def plot_initial_dot_grad_param(ax, metrics, **kwargs):
     plot_dot_grad_param(ax, {"name": metrics["name"], "metrics": df[df["step"] < 100]}, **kwargs)
 
 def plot_param_norm(ax, metrics, **kwargs):
-    plot_metric(ax, metrics, "param_size", epoch=False, **kwargs)
+    try:
+        plot_metric(ax, metrics, "param_norm", epoch=False, **kwargs)
+    except KeyError: # legacy
+        plot_metric(ax, metrics, "param_size", epoch=False, **kwargs)
     ax.set_title("Parameter norm")
     ax.set_xlabel("Step")
     ax.set_yscale("log")
@@ -239,7 +249,7 @@ def plot_summary(problem):
         plot_initial_learning_rate(axs[1,0], item, idx=idx)
         plot_step_size(axs[1,1], item, idx=idx)
 
-    metrics = extract_metrics(problem_dir, plot_filter(["Adam(lr=1e-2)", "SGD(lr=1)"]))
+    metrics = extract_metrics(problem_dir, plot_filter(["Adam(lr=1e-3)", "SGD(lr=0.1)"]))
     for (idx, item) in enumerate(metrics, start=len(wanted)):
         plot_validation_loss(axs[0,0], item, idx=idx)
         plot_step_size(axs[1,1], item, idx=idx)

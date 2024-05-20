@@ -1,2 +1,0 @@
-loss: !!python/name:torch.nn.functional.nll_loss ''
-lr: 1
