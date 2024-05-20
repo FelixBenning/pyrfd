@@ -140,14 +140,7 @@ def main(problem_name, opt):
                 hyperparameters={
                     "covariance_model": sq_exp_cov_model,
                     "b_size_inv": 1/problem["batch_size"],
-                    "conservatism": 0.1,
-                },
-            )
-            train(
-                problem,
-                opt=RFD,
-                hyperparameters={
-                    "covariance_model": sq_exp_cov_model,
+                    "conservatism": 0.05,
                 },
             )
             train(
@@ -156,6 +149,13 @@ def main(problem_name, opt):
                 hyperparameters={
                     "covariance_model": sq_exp_cov_model,
                     "b_size_inv": 1/problem["batch_size"],
+                },
+            )
+            train(
+                problem,
+                opt=RFD,
+                hyperparameters={
+                    "covariance_model": sq_exp_cov_model,
                 },
             )
     
@@ -182,9 +182,10 @@ def main(problem_name, opt):
         for seed in range(20):
             problem["seed"] = seed
             for lr in [
+                1e-1,
                 1e-2,
-                # 1e-3,
-                # 1e-4
+                1e-3,
+                1e-4
             ]:
                 train(
                     problem,
