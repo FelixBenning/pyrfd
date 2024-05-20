@@ -8,6 +8,7 @@ from abc import abstractmethod
 from ctypes import ArgumentError
 from logging import warning
 from typing import Tuple
+import torch
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -433,7 +434,7 @@ class SquaredExponential(IsotropicCovariance):
         return (
             var_g_adjust
             * (self.scale**2)
-            / (np.sqrt(tmp**2 + (self.scale * grad_norm * var_g_adjust) ** 2) + tmp)
+            / (torch.sqrt(tmp**2 + (self.scale * grad_norm * var_g_adjust) ** 2) + tmp)
         )
 
 
