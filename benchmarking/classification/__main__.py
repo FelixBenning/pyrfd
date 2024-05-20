@@ -1,5 +1,6 @@
 """ Benchmarking RFD """
 
+import torch
 from torch import optim, nn
 import torch.nn.functional as F
 import lightning as L
@@ -107,6 +108,7 @@ def main(problem_name, opt):
                 cache=f"""cache/{problem["dataset"].__name__}/{problem["model"].__name__}_run={run}/covariance_cache.csv""",
             )
 
+    torch.set_float32_matmul_precision("high")
 
     if opt == "RFD-SE":
         sq_exp_cov_model = covariance.SquaredExponential()
