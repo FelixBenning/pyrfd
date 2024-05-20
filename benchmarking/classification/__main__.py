@@ -11,7 +11,7 @@ from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 # pylint: disable=import-error,wrong-import-order
 from benchmarking.classification.cifar.data import CIFAR100
 from benchmarking.classification.cifar.models import Resnet18
-from mnist.data import MNIST
+from mnist.data import MNIST, FashionMNIST
 from mnist.models import CNN3, CNN5, CNN7  # pylint: disable=unused-import
 from classifier import Classifier
 
@@ -51,6 +51,18 @@ def trainer_from_problem(problem, opt_name, hyperparameters):
 
 
 PROBLEMS = {
+    "FashionMNIST_CNN5" : {
+        "dataset": FashionMNIST,
+        "model": CNN5,
+        "loss": F.nll_loss,
+        "batch_size": 128,
+        "seed": 42,
+        "tol": 0.3,
+        "trainer_params": {
+            "max_epochs": 30,
+            "log_every_n_steps": 1,
+        }
+    },
     "MNIST_CNN3" : {
         "dataset": MNIST,
         "model": CNN3,
@@ -128,24 +140,24 @@ def main(problem_name, opt):
                 hyperparameters={
                     "covariance_model": sq_exp_cov_model,
                     "b_size_inv": 1/problem["batch_size"],
-                    "conservatism": 0.99,
+                    "conservatism": 0.1,
                 },
             )
-            # train(
-            #     problem,
-            #     opt=RFD,
-            #     hyperparameters={
-            #         "covariance_model": sq_exp_cov_model,
-            #     },
-            # )
-            # train(
-            #     problem,
-            #     opt=RFD,
-            #     hyperparameters={
-            #         "covariance_model": sq_exp_cov_model,
-            #         "b_size_inv": 1/problem["batch_size"],
-            #     },
-            # )
+            train(
+                problem,
+                opt=RFD,
+                hyperparameters={
+                    "covariance_model": sq_exp_cov_model,
+                },
+            )
+            train(
+                problem,
+                opt=RFD,
+                hyperparameters={
+                    "covariance_model": sq_exp_cov_model,
+                    "b_size_inv": 1/problem["batch_size"],
+                },
+            )
     
     if opt == "RFD-RQ":
         rat_quad_cov_model = covariance.RationalQuadratic(beta=1)
