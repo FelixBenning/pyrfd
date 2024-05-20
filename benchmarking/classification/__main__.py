@@ -67,7 +67,7 @@ PROBLEMS = {
         "dataset": MNIST,
         "model": CNN7,
         "loss": F.nll_loss,
-        "batch_size": 128,
+        "batch_size": 1024,
         "seed": 42,
         "tol": 0.3,
         "trainer_params": {
@@ -127,16 +127,25 @@ def main(problem_name, opt):
                 opt=RFD,
                 hyperparameters={
                     "covariance_model": sq_exp_cov_model,
-                },
-            )
-            train(
-                problem,
-                opt=RFD,
-                hyperparameters={
-                    "covariance_model": sq_exp_cov_model,
                     "b_size_inv": 1/problem["batch_size"],
+                    "conservatism": 0.99,
                 },
             )
+            # train(
+            #     problem,
+            #     opt=RFD,
+            #     hyperparameters={
+            #         "covariance_model": sq_exp_cov_model,
+            #     },
+            # )
+            # train(
+            #     problem,
+            #     opt=RFD,
+            #     hyperparameters={
+            #         "covariance_model": sq_exp_cov_model,
+            #         "b_size_inv": 1/problem["batch_size"],
+            #     },
+            # )
     
     if opt == "RFD-RQ":
         rat_quad_cov_model = covariance.RationalQuadratic(beta=1)
@@ -160,7 +169,11 @@ def main(problem_name, opt):
     if opt == "Adam":
         for seed in range(20):
             problem["seed"] = seed
-            for lr in [1e-1, 1e-2, 1e-3, 1e-4]:
+            for lr in [
+                1e-2,
+                # 1e-3,
+                # 1e-4
+            ]:
                 train(
                     problem,
                     opt=optim.Adam,
