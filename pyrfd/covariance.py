@@ -429,13 +429,12 @@ class SquaredExponential(IsotropicCovariance):
         var_adjust = var_reg.intercept / var_reg(b_size_inv)
         var_g_adjust = g_var_reg.intercept / g_var_reg(b_size_inv)
 
-        tmp = var_adjust * (self.mean - loss) / 2
-        tmp = tmp if tmp > 0 else 0  # stability
-        return (
-            var_g_adjust
-            * (self.scale**2)
-            / (torch.sqrt(tmp**2 + (self.scale * grad_norm * var_g_adjust) ** 2) + tmp)
+        t1 = var_adjust * (self.mean - loss) / 2
+        t1 = t1 if t1 > 0 else 0  # stability
+        t2 = torch.sqrt(
+            torch.as_tensor(t1**2 + (self.scale * grad_norm * var_g_adjust) ** 2)
         )
+        return var_g_adjust * (self.scale**2) / (t2 + t1)
 
 
 class RationalQuadratic(IsotropicCovariance):
