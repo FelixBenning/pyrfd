@@ -12,7 +12,7 @@ from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 from benchmarking.classification.cifar.data import CIFAR100
 from benchmarking.classification.cifar.models import Resnet18
 from mnist.data import MNIST, FashionMNIST
-from mnist.models import CNN3, CNN5, CNN7  # pylint: disable=unused-import
+from mnist.models import CNN3, CNN5, CNN7, AlgoPerf  # pylint: disable=unused-import
 from classifier import Classifier
 
 from pyrfd import RFD, covariance
@@ -54,6 +54,18 @@ PROBLEMS = {
     "FashionMNIST_CNN5" : {
         "dataset": FashionMNIST,
         "model": CNN5,
+        "loss": F.nll_loss,
+        "batch_size": 128,
+        "seed": 42,
+        "tol": 0.3,
+        "trainer_params": {
+            "max_epochs": 30,
+            "log_every_n_steps": 1,
+        }
+    },
+    "MNIST_AlgoPerf":{
+        "dataset": MNIST,
+        "model": AlgoPerf,
         "loss": F.nll_loss,
         "batch_size": 128,
         "seed": 42,
@@ -134,15 +146,6 @@ def main(problem_name, opt):
 
         for seed in range(20):
             problem["seed"] = seed
-            train(
-                problem,
-                opt=RFD,
-                hyperparameters={
-                    "covariance_model": sq_exp_cov_model,
-                    "b_size_inv": 1/problem["batch_size"],
-                    "conservatism": 0.05,
-                },
-            )
             train(
                 problem,
                 opt=RFD,
