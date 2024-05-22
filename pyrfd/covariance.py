@@ -119,9 +119,11 @@ class IsotropicCovariance:
         neg_sq_half = -(stepsize**2) / 2
 
         corr = self.kernel(neg_sq_half) / self.var_reg(b_size_inv)
-        g_corr = stepsize * self.diff_kernel(neg_sq_half) / self.g_var_reg(b_size_inv)
 
-        return self.mean + corr * (loss - self.mean) - g_corr * grad_norm
+        d_cov = stepsize * self.diff_kernel(neg_sq_half)
+        d_corr = d_cov * self.dims / self.g_var_reg(b_size_inv)
+
+        return self.mean + corr * (loss - self.mean) - d_corr * grad_norm
 
     def diff_cond_expectation(self, stepsize, loss, grad_norm, b_size_inv=0):
         """derivative of the conditional expectation of the cost given batch loss and gradient norm
@@ -131,10 +133,10 @@ class IsotropicCovariance:
         neg_sq_half = -sq_step / 2
 
         corr = -stepsize * self.diff_kernel(neg_sq_half) / self.var_reg(b_size_inv)
-        g_cov = self.diff_kernel(neg_sq_half) - sq_step * self.diff2_kernel(neg_sq_half)
-        g_corr = g_cov / self.g_var_reg(b_size_inv)
+        d_cov = self.diff_kernel(neg_sq_half) - sq_step * self.diff2_kernel(neg_sq_half)
+        d_corr = d_cov * self.dims / self.g_var_reg(b_size_inv)
 
-        return corr * (loss - self.mean) - g_corr * grad_norm
+        return corr * (loss - self.mean) - d_corr * grad_norm
 
     def cond_variance(self, stepsize, b_size_inv=0):
         """the conditional variance of the cost given batch loss and gradient norm
@@ -145,9 +147,9 @@ class IsotropicCovariance:
 
         var = self.var_reg.intercept
         explained_var_1 = (self.kernel(neg_sq_half) ** 2) / self.var_reg(b_size_inv)
-        explained_var_2 = (
-            sq_step * (self.diff_kernel(neg_sq_half) ** 2) / self.g_var_reg(b_size_inv)
-        )
+
+        d_cov_sq = sq_step * (self.diff_kernel(neg_sq_half) ** 2)
+        explained_var_2 = d_cov_sq * self.dims / self.g_var_reg(b_size_inv)
         return var - explained_var_1 - explained_var_2
 
     def diff_cond_variance(self, stepsize, b_size_inv=0):
@@ -162,7 +164,7 @@ class IsotropicCovariance:
         t2 = self.diff_kernel(neg_sq_half) * self.diff2_kernel(neg_sq_half)
         t2 *= stepsize**3
         t3 = stepsize * self.diff_kernel(neg_sq_half) ** 2
-        return 2 * (t1 + (t2 - t3) / self.g_var_reg(b_size_inv))
+        return 2 * (t1 + ((t2 - t3) * self.dims / self.g_var_reg(b_size_inv)))
 
     def learning_rate(self, loss, grad_norm, *, b_size_inv=0, conservatism=0):
         """learning rate of this covariance model from the RFD paper"""

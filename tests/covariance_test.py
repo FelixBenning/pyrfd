@@ -31,15 +31,6 @@ def test_squared_exponential(mean, var, scale, cost, grad_norm, dims):
 
     assert cov.asymptotic_learning_rate() == pytest.approx(scale**2 / mean)
 
-    conservatism = [-0.1, -0.01, 0, 0.01, 0.1, 0.5, 0.8, 0.9]
-    rates = [
-        cov.learning_rate(loss=cost, grad_norm=grad_norm, conservatism=c)
-        for c in conservatism
-    ]
-
-    if sorted(rates, reverse=True) != rates:
-        raise AssertionError("Learning rates are not decreasing in conservatism")
-
     # taking a zero step size should not change the cost
     assert cov.cond_expectation(0, cost, np.exp(rng.random())) == pytest.approx(cost)
 
@@ -49,3 +40,12 @@ def test_squared_exponential(mean, var, scale, cost, grad_norm, dims):
 
     # going really far away should imply that the conditional variance is the same as the variance
     assert cov.cond_variance(1e12) == pytest.approx(var)
+
+    conservatism = [-0.1, -0.01, 0, 0.01, 0.1, 0.5, 0.8, 0.9]
+    rates = [
+        cov.learning_rate(loss=cost, grad_norm=grad_norm, conservatism=c)
+        for c in conservatism
+    ]
+
+    if sorted(rates, reverse=True) != rates:
+        raise AssertionError("Learning rates are not decreasing in conservatism")
