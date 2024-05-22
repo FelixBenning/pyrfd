@@ -161,3 +161,17 @@ cython_debug/
 
 # Apple junk
 .DS_Store
+
+
+# Caches
+# cache/*
+logs/*
+!logs/MNIST_CNN7_b=1024
+!logs/MNIST_CNN7_b=128
+!logs/MNIST_AlgoPerf_b=128
+!logs/FashionMNIST_CNN5_b=128
+!logs/MNIST_CNN3_b=128
+data/*
+slurm-*
+wandb
+plot/*.pdf

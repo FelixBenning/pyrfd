@@ -3,132 +3,32 @@ Module providing Covariance models to pass to RFD. I.e. they can be fitted
 using loss samples and they provide a learning rate
 """
 
+from __future__ import annotations
 from abc import abstractmethod
 from ctypes import ArgumentError
 from logging import warning
-import math
+from typing import Tuple
+import torch
 import pandas as pd
-from sklearn.linear_model import LinearRegression
 import numpy as np
 import matplotlib.pyplot as plt
-import torch
 from scipy import stats
 from tqdm import tqdm
 
+from . import plots
+
 from .batchsize import (
-    DEFAULT_VAR_REG,
     batchsize_counts,
     empirical_intercept_variance,
-    limit_intercept_variance,
+    theoretical_intercept_variance,
 )
 
-from .sampling import CachedSamples, IsotropicSampler, _budget
-
-
-def selection(sorted_list, num_elts):
-    """
-    return a selection of num_elts from the sorted_list (evenly spaced in the index)
-    always includes the first and last index
-    """
-    if len(sorted_list) < num_elts:
-        return sorted_list
-    idxs = np.round(np.linspace(0, len(sorted_list) - 1, num_elts)).astype(int)
-    return sorted_list[idxs]
-
-
-def fit_mean_var(
-    batch_sizes: np.array,
-    batch_losses: np.array,
-    *,
-    max_bootstrap=100,
-    var_reg=DEFAULT_VAR_REG,
-    logging=False,
-):
-    """Bootstraps weighted least squares regression (WLS) to determine the mean,
-    and variance of the loss at varying batchsizes. Returns the mean and variance
-    regression.
-
-    An existing regression can be passed to act as a starting point
-    for the bootstrap.
-    """
-    batch_sizes = np.array(batch_sizes)
-    batch_losses = np.array(batch_losses)
-    b_inv = 1 / batch_sizes
-
-    # we initialize with the assumption that the variance at batch_size=Inf is zero
-    var_reg = LinearRegression(fit_intercept=True)
-    var_reg.fit(
-        np.array([[0], [1]]), np.array([0, 1])
-    )  # initialize with beta0=1 and beta1=1
-
-    # bootstrapping Weighted Least Squares (WLS)
-    for idx in range(max_bootstrap):
-        variances = var_reg.predict(
-            b_inv.reshape(-1, 1)
-        )  # variance at batchsizes 1/b in X
-
-        mu = np.average(batch_losses, weights=1 / variances)
-        centered_squares = (batch_losses - mu) ** 2
-
-        old_intercept = var_reg.intercept_
-        # fourth moments i.e. 3*sigma^4 = 3 * var^2 are the variance of the centered
-        # squares, the weights should be 1/these variances
-        # (we leave out the 3 as it does not change the relative weights)
-        var_reg.fit(
-            b_inv.reshape(-1, 1),
-            centered_squares,
-            sample_weight=1 / variances**2,
-        )
-
-        if math.isclose(old_intercept, var_reg.intercept_):
-            if logging:
-                tqdm.write(f"Bootstrapping WLS converged in {idx} iterations")
-            return {"mean": mu, "var_regression": var_reg}
-
-    warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
-    return {"mean": mu, "var_regression": var_reg}
-
-
-def isotropic_derivative_var_estimation(
-    batch_sizes: np.array,
-    sq_grad_norms: np.array,
-    *,
-    max_bootstrap=100,
-    g_var_reg=DEFAULT_VAR_REG,
-    logging=False,
-) -> LinearRegression:
-    """Bootstraps weighted least squares regression (WLS) to determine the
-    expectation of gradient norms of the loss at varying batchsizes.
-    Returns the regression of the mean against 1/b where b is the batchsize.
-
-    An existing regression can be passed to act as a starting point
-    for the bootstrap.
-    """
-    batch_sizes = np.array(batch_sizes)
-    b_inv: np.array = 1 / batch_sizes
-
-    # bootstrapping WLS
-    for idx in range(max_bootstrap):
-        variances: np.array = g_var_reg.predict(
-            b_inv.reshape(-1, 1)
-        )  # variances at batchsize 1/b
-
-        # squared grad norms are already (iid) sums of squared Gaussians
-        # variance of squares is 3Var^2 but the 3 does not matter as it cancels
-        # out in the weighting we also have a sum of squares (norm), but this
-        # also only results in a constant which does not matter
-        old_bias = g_var_reg.intercept_
-        g_var_reg.fit(
-            b_inv.reshape(-1, 1), sq_grad_norms, sample_weight=1 / variances**2
-        )
-
-        if math.isclose(old_bias, g_var_reg.intercept_):
-            if logging:
-                tqdm.write(f"Bootstrapping WLS converged in {idx} iterations")
-            return g_var_reg
-
-    warning(f"Bootstrapping WLS did not converge in max_bootstrap={max_bootstrap}")
-    return g_var_reg
+from .sampling import CSVSampleCache, IsotropicSampler, SampleCache
+from .regression import (
+    ScalarRegression,
+    fit_mean_var,
+    isotropic_derivative_var_estimation,
+)
 
 
 class IsotropicCovariance:
@@ -137,219 +37,256 @@ class IsotropicCovariance:
     Can be subclassed for specific covariance models (see e.g. SquaredExponential)
     """
 
-    __slots__ = "mean", "var_reg", "g_var_reg", "dims", "fitted"
+    __slots__ = "mean", "var_reg", "g_var_reg", "dims", "_fitted"
 
-    def __init__(self) -> None:
-        self.fitted = False
-        self.var_reg = DEFAULT_VAR_REG
-        self.g_var_reg = DEFAULT_VAR_REG
-        self.dims = None
-        self.mean = None
+    def __init__(
+        self,
+        *,
+        mean=None,
+        variance: Tuple[float, float] | None = None,
+        gradient_var: Tuple[float, float] | None = None,
+        dims=None,
+    ) -> None:
+
+        self.mean = mean
+        self.dims = dims
+
+        self.var_reg = None
+        self.g_var_reg = None
+
+        if variance is not None:
+            self.var_reg = ScalarRegression(*variance)
+            assert self.var_reg.is_plausible_variance_regression
+
+        if gradient_var is not None:
+            self.g_var_reg = ScalarRegression(*gradient_var)
+            assert self.g_var_reg.is_plausible_variance_regression
+
+        self._fitted = False
+        if self._is_fitted():
+            self._fitted = True
+
+    def _is_fitted(self):
+        return (self.mean is not None) and self.var_reg and self.g_var_reg and self.dims
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(" + self._repr_helper() + ")"
+
+    def _repr_helper(self):
+        var = repr(None)
+        if self.var_reg:
+            var = f"({self.var_reg.intercept}, {self.var_reg.slope})"
+
+        g_var = repr(None)
+        if self.g_var_reg:
+            g_var = f"({self.g_var_reg.intercept}, {self.g_var_reg.slope})"
+
+        return (
+            f"mean={self.mean}, "
+            f"variance={var}, "
+            f"gradient_var={g_var}, "
+            f"dims={self.dims}"
+        )
 
     @abstractmethod
-    def learning_rate(self, loss, grad_norm):
-        """learning rate of this covariance model from the RFD paper"""
+    def kernel(self, neg_sq_half):
+        """the kernel of the covariance model as a function of
+            `neg_sq_half = - dist^2/2`
+        where dist is the distance between two points
+        """
         return NotImplemented
 
-    def fit(self, df: pd.DataFrame, dims):
-        """ " Fit the covariance model with loss and gradient norm samples
+    @abstractmethod
+    def diff_kernel(self, neg_sq_half):
+        """the derivative of the kernel of the covariance model as a function of
+            `neg_sq_half = - dist^2/2`
+        where dist is the distance between two points
+        """
+        return NotImplemented
+
+    @abstractmethod
+    def diff2_kernel(self, neg_sq_half):
+        """the second derivative of the kernel of the covariance model as a function of
+            `neg_sq_half = - dist^2/2`
+        where dist is the distance between two points
+        """
+        return NotImplemented
+
+    def cond_expectation(self, stepsize, loss, grad_norm, b_size_inv=0):
+        """the conditional expectation of the cost given batch loss and gradient norm
+        assuming a step in the direction of the negative gradient
+        """
+        neg_sq_half = -(stepsize**2) / 2
+
+        corr = self.kernel(neg_sq_half) / self.var_reg(b_size_inv)
+
+        d_cov = stepsize * self.diff_kernel(neg_sq_half)
+        d_corr = d_cov * self.dims / self.g_var_reg(b_size_inv)
+
+        return self.mean + corr * (loss - self.mean) - d_corr * grad_norm
+
+    def diff_cond_expectation(self, stepsize, loss, grad_norm, b_size_inv=0):
+        """derivative of the conditional expectation of the cost given batch loss and gradient norm
+        assuming a step in the direction of the negative gradient
+        """
+        sq_step = stepsize**2
+        neg_sq_half = -sq_step / 2
+
+        corr = -stepsize * self.diff_kernel(neg_sq_half) / self.var_reg(b_size_inv)
+        d_cov = self.diff_kernel(neg_sq_half) - sq_step * self.diff2_kernel(neg_sq_half)
+        d_corr = d_cov * self.dims / self.g_var_reg(b_size_inv)
+
+        return corr * (loss - self.mean) - d_corr * grad_norm
+
+    def cond_variance(self, stepsize, b_size_inv=0):
+        """the conditional variance of the cost given batch loss and gradient norm
+        assuming a step in the direction of the negative gradient
+        """
+        sq_step = stepsize**2
+        neg_sq_half = -sq_step / 2
+
+        var = self.var_reg.intercept
+        explained_var_1 = (self.kernel(neg_sq_half) ** 2) / self.var_reg(b_size_inv)
+
+        d_cov_sq = sq_step * (self.diff_kernel(neg_sq_half) ** 2)
+        explained_var_2 = d_cov_sq * self.dims / self.g_var_reg(b_size_inv)
+        return var - explained_var_1 - explained_var_2
+
+    def diff_cond_variance(self, stepsize, b_size_inv=0):
+        """derivative of the conditional variance of the cost given batch loss and gradient norm
+        assuming a step in the direction of the negative gradient
+        """
+        sq_step = stepsize**2
+        neg_sq_half = -sq_step / 2
+        t1 = stepsize * self.kernel(neg_sq_half) * self.diff_kernel(neg_sq_half)
+        t1 /= self.var_reg(b_size_inv)
+
+        t2 = self.diff_kernel(neg_sq_half) * self.diff2_kernel(neg_sq_half)
+        t2 *= stepsize**3
+        t3 = stepsize * self.diff_kernel(neg_sq_half) ** 2
+        return 2 * (t1 + ((t2 - t3) * self.dims / self.g_var_reg(b_size_inv)))
+
+    def learning_rate(self, loss, grad_norm, *, b_size_inv=0, conservatism=0):
+        """learning rate of this covariance model from the RFD paper"""
+
+        if conservatism != 0:
+            regularization = stats.norm.ppf(conservatism / 2 + 0.5)
+
+            def diff_cost(stepsize):
+                cond_var = self.cond_variance(stepsize, b_size_inv=b_size_inv)
+                d_cond_var = self.diff_cond_variance(stepsize, b_size_inv=b_size_inv)
+                reg = regularization * 0.5 * d_cond_var / np.sqrt(cond_var)
+
+                dce = self.diff_cond_expectation(stepsize, loss, grad_norm, b_size_inv)
+                return dce + reg
+
+        else:
+
+            def diff_cost(stepsize):
+                return self.diff_cond_expectation(stepsize, loss, grad_norm, b_size_inv)
+
+        left = 0  # diff_cost(0) < 0
+        right = next(s for s in [2**x for x in range(-20, 20)] if diff_cost(s) > 0)
+
+        # find minimum
+        stepsize = bisection_incr(diff_cost, left, right)
+
+        return stepsize / grad_norm  # learning rate
+
+    def asymptotic_learning_rate(self, b_size_inv=0, limiting_loss=0):
+        """asymptotic learning rate of RFD
+
+        b_size_inverse:
+            The inverse 1/b of the batch size b for which the learning rate is used
+            (default is 0)
+        limiting_loss:
+            The loss at the end of optimization (default is 0)
+        """
+        assert self._fitted, "The covariance has not been fitted yet."
+        assert (
+            b_size_inv <= 1
+        ), "Please pass the batch size inverse 1/b not the batch size b"
+        enumerator = self.var_reg(b_size_inv)
+        denominator = (
+            self.g_var_reg(b_size_inv) / self.dims * (self.mean - limiting_loss)
+        )
+        return enumerator / denominator
+
+    def fit(self, df: pd.DataFrame):
+        """Fit the covariance model with loss and gradient norm samples
         provided in a pandas dataframe, with columns containing:
 
         - batchsize
         - loss
         - grad_norm or sq_grad_norm
         """
-        self.dims = dims
         if ("sq_grad_norm" not in df) and ("grad_norm" in df):
             df["sq_grad_norm"] = df["grad_norm"] ** 2
 
         tmp = fit_mean_var(df["batchsize"], df["loss"], var_reg=self.var_reg)
         self.mean = tmp["mean"]
-        self.var_reg: LinearRegression = tmp["var_regression"]
+        self.var_reg: ScalarRegression = tmp["var_regression"]
 
-        self.g_var_reg: LinearRegression = isotropic_derivative_var_estimation(
+        self.g_var_reg: ScalarRegression = isotropic_derivative_var_estimation(
             df["batchsize"], df["sq_grad_norm"], g_var_reg=self.g_var_reg
         )
-        self.fitted = True
 
-        # ============================
-        # === sanity check plots ===
-        # ============================
-        grouped = df.groupby("batchsize", sort=True)
-        b_size_grouped = grouped.agg(
-            loss_mean=pd.NamedAgg(column="loss", aggfunc="mean"),
-            loss_var=pd.NamedAgg(
-                column="loss", aggfunc=lambda x: np.mean((x - self.mean) ** 2)
-            ),
-            sq_grad_norm_mean=pd.NamedAgg(column="sq_grad_norm", aggfunc="mean"),
-        ).reset_index()
-        b_size_g_inv: np.array = 1 / b_size_grouped["batchsize"]
-        var_estimates = self.var_reg.predict(b_size_g_inv.to_numpy().reshape(-1, 1))
+        self._fitted = True
 
-        # only select <100 examples per batch size
-        reduced_df = df.groupby("batchsize").head(100).reset_index(drop=True)
-        b_size_inv = 1 / reduced_df["batchsize"]
+        if not self.var_reg.is_plausible_variance_regression:
+            warning(
+                "The variance regression has a negative intercept, since negative "
+                "variances are not meaningful, the regression is reset to None."
+            )
+            self._fitted = False
+            self.var_reg = None
 
-        fig, axs = plt.subplots(3, 2)
+        if not self.g_var_reg.is_plausible_variance_regression:
+            warning(
+                "The gradient variance regression has a negative intercept, since negative "
+                "variances are not meaningful, the regression is reset to None."
+            )
+            self._fitted = False
+            self.g_var_reg = None
 
-        # ==== Plot Losses =====
+        return self
+
+    def plot_sanity_checks(self, df: pd.DataFrame, batch_sizes=None):
+        """Plot Sanity Check Plots"""
+        fig, axs = plt.subplots(3, 2, figsize=(9, 8))
+
+        plots.plot_loss(axs[0, 0], df, mean=self.mean, var_reg=self.var_reg)
         axs[0, 0].set_xscale("log")
-        # axs[0,0].set_xlabel("1/b")
+        axs[0, 0].set_xlabel("")
 
-        # scatterplot
-        axs[0, 0].scatter(
-            b_size_inv,
-            reduced_df["loss"],
-            s=1,  # marker size
-            label=r"$\mathcal{L}_b(w)$",
-        )
-        # batchwise means
-        axs[0, 0].plot(
-            b_size_g_inv,
-            b_size_grouped["loss_mean"],
-            marker="*",
-            label="batchwise mean",
-        )
-        axs[0, 0].plot(
-            b_size_g_inv,
-            np.full_like(b_size_g_inv, fill_value=self.mean),
-            label=rf"$\hat\mu={self.mean:.4}$",
-        )
-        axs[0, 0].fill_between(
-            x=b_size_g_inv,
-            y1=self.mean + stats.norm.ppf(0.025) * np.sqrt(var_estimates),
-            y2=self.mean + stats.norm.ppf(0.975) * np.sqrt(var_estimates),
-            alpha=0.3,
-        )
-        # legend
-        axs[0, 0].legend(loc="upper left")
+        plots.plot_squared_losses(axs[1, 0], df, mean=self.mean, var_reg=self.var_reg)
+        axs[1, 0].set_xlabel("")
 
-        # QQplot
-        # b_size_selection = np.array(selection(b_size_grouped["batchsize"], 5))[1:]
-        # for bs in b_size_selection:
-        bsize_counts = df["batchsize"].value_counts(sort=True, ascending=False)
-        bs = bsize_counts.index[0]
-        stats.probplot(grouped.get_group(bs)["loss"], dist="norm", plot=axs[0, 1])
-        for idx, line in enumerate(axs[0, 1].get_lines()):
-            # line.set_color(f"C{idx//2}")
-            if idx % 2 == 0:  # scatter
-                line.set_markersize(1)
-                line.set_label(f"b={bs}")
-            if idx % 2 == 1:
-                line.set_linestyle("--")
-
-        axs[0, 1].set_xlabel("")
-        axs[0, 1].legend()
-
-        # === Plot squared errors =====
-        # axs[1,0].set_xlabel("1/b")
-        # axs[1,0].set_xscale("log")
-        axs[1, 0].scatter(
-            b_size_inv,
-            (reduced_df["loss"] - self.mean) ** 2,
-            s=1,  # marker size
-            label=r"$(\mathcal{L}_b(w)-\hat{\mu})^2$",
-        )
-        axs[1, 0].plot(
-            b_size_g_inv,
-            b_size_grouped["loss_var"],
-            marker="*",
-            label="batchwise mean squares",
-        )
-        axs[1, 0].plot(
-            b_size_g_inv,
-            var_estimates,
-            label=r"Var$(\mathcal{L}_b(w))$",
-        )
-        axs[1, 0].fill_between(
-            x=b_size_g_inv,
-            # χ^2 confidence bounds
-            y1=var_estimates + (stats.chi2.ppf(0.025, df=1) - 1) * var_estimates,
-            y2=var_estimates + (stats.chi2.ppf(0.975, df=1) - 1) * var_estimates,
-            alpha=0.3,
-        )
-        axs[1, 0].legend(loc="upper left")
-
-        # QQ-plot against chi^2
-        # for bs in b_size_selection:
-        stats.probplot(
-            (grouped.get_group(bs)["loss"] - self.mean) ** 2,
-            dist=stats.chi2(df=1),
-            plot=axs[1, 1],
-        )
-        for idx, line in enumerate(axs[1, 1].get_lines()):
-            # line.set_color(f"C{idx//2}")
-            if idx % 2 == 0:  # scatter
-                line.set_markersize(1)
-                line.set_label(f"b={bs}")
-            if idx % 2 == 1:
-                line.set_linestyle("--")
-        axs[1, 1].set_title("")
-        axs[1, 1].set_xlabel("")
-        axs[1, 1].legend()
-
-        # ==== Plot Gradient Norms ====
-        axs[2, 0].set_xlabel("1/b")
-        axs[2, 0].scatter(
-            b_size_inv,
-            reduced_df["sq_grad_norm"],
-            s=1,  # marker size
-            label=r"$\|\nabla\mathcal{L}_b(w)\|^2$",
-        )
-        axs[2, 0].plot(
-            b_size_g_inv,
-            b_size_grouped["sq_grad_norm_mean"],
-            marker="*",
-            label="batchwise mean",
-        )
-        sq_norm_means = self.g_var_reg.predict(b_size_g_inv.to_numpy().reshape(-1, 1))
-        axs[2, 0].plot(
-            b_size_g_inv,
-            sq_norm_means,
-            label=r"$\mathbb{E}[\|\nabla\mathcal{L}_b(w)\|^2]$",
-        )
-        axs[2, 0].fill_between(
-            x=b_size_g_inv,
-            y1=sq_norm_means
-            + (stats.chi2.ppf(0.025, dims) - dims) * sq_norm_means / dims,
-            y2=sq_norm_means
-            + (stats.chi2.ppf(0.975, dims) - dims) * sq_norm_means / dims,
-            alpha=0.3,
+        plots.plot_gradient_norms(
+            axs[2, 0],
+            df,
+            g_var_reg=self.g_var_reg,
+            dims=self.dims,
         )
 
-        axs[2, 0].legend(loc="upper left")
-
-        # for bs in b_size_selection:
-        stats.probplot(
-            grouped.get_group(bs)["sq_grad_norm"],
-            dist=stats.chi2(df=dims),
-            plot=axs[2, 1],
+        plots.qq_plot_losses(axs[0, 1], df, batch_sizes=batch_sizes)
+        plots.qq_plot_squared_losses(
+            axs[1, 1], df, mean=self.mean, batch_sizes=batch_sizes
         )
-        for idx, line in enumerate(axs[2, 1].get_lines()):
-            # line.set_color(f"C{idx//2}")
-            if idx % 2 == 0:  # scatter
-                line.set_markersize(1)
-                line.set_label(f"b={bs}")
-            if idx % 2 == 1:
-                line.set_linestyle("--")
-        axs[2, 1].set_title("")
-        axs[2, 1].legend()
-
-        return (
-            (fig, axs),
-            {
-                "mean": self.mean,
-                "var_reg": self.var_reg,
-                "g_var_reg": self.g_var_reg,
-            },
+        plots.qq_plot_sq_gradient_norms(
+            axs[2, 1], df, dims=self.dims, batch_sizes=batch_sizes
         )
 
+        return (fig, axs)
+
+    # pylint: disable=too-many-arguments,too-many-locals
     def auto_fit(
         self,
         model_factory,
         loss,
         data,
-        cache=None,
+        *,
+        cache: SampleCache | str | None = None,
         tol=0.4,
         initial_budget=6000,
         max_iter=10,
@@ -367,45 +304,26 @@ class IsotropicCovariance:
         different batch size parameters such that it returns (x,y) tuples when
         iterated on
         """
-        dims = sum(p.numel() for p in model_factory().parameters() if p.requires_grad)
         print(f"\n\nAutomatically fitting Covariance Model: {repr(self)}")
 
-        sampler = IsotropicSampler(model_factory, loss, data)
+        sampler = IsotropicSampler(
+            model_factory,
+            loss,
+            data,
+            cache=(cache if isinstance(cache, SampleCache) else CSVSampleCache(cache)),
+        )
+        self.dims = sampler.dims
 
-        if cache:
-            print(
-                "Tip: You can cancel sampling at any time, samples will be saved in the cache."
-            )
-        else:
-            warning(
-                "Without a cache it is necessary to re-fit the covariance model"
-                + "every time. Please pass a filepath to the cache parameter"
-            )
-
-        cached_samples = CachedSamples(cache)
         budget = initial_budget
         outer_pgb = None
         for idx in range(max_iter):
-            # COPY of cached_samples, not ref
-            samples = cached_samples.as_dataframe()
+            if len(sampler) > 0 and sampler.sample_cost >= initial_budget:
+                self.fit(sampler.snapshot_as_dataframe())
 
-            bsize_counts = pd.Series()
-            if len(cached_samples) > 0:
-                bsize_counts = samples["batchsize"].value_counts()
-
-            total_samples = _budget(bsize_counts)
-            if total_samples >= initial_budget:
-                self.fit(samples, dims)
-
-            var_mean = self.var_reg.intercept_
-            if var_mean <= 0:
-                # negative variance est -> reset
-                self.fitted = False
-                self.var_reg = DEFAULT_VAR_REG
-
-            if self.fitted:
+            bsize_counts = sampler.bsize_counts
+            if self._fitted:
                 var_var = empirical_intercept_variance(bsize_counts, self.var_reg)
-                rel_error = np.sqrt(var_var) / var_mean
+                rel_error = np.sqrt(var_var) / self.var_reg.intercept_
                 tqdm.write(f"\nCheckpoint {idx}:")
                 tqdm.write(
                     "-----------------------------------------------------------"
@@ -422,7 +340,8 @@ class IsotropicCovariance:
                     values=(bsize_counts.index, bsize_counts / sum(bsize_counts))
                 )
                 lim_sdv = (
-                    np.sqrt(limit_intercept_variance(dist, self.var_reg)) / var_mean
+                    np.sqrt(theoretical_intercept_variance(dist, self.var_reg))
+                    / self.var_reg.intercept_
                 )
                 # need: lim_sdv/sqrt(budget) < tol
                 pred_necessary_budget = (lim_sdv / tol) ** 2
@@ -430,7 +349,7 @@ class IsotropicCovariance:
                 # allocate budget in 20% chunks to allow for early stopping
                 budget = min(
                     pred_necessary_budget / 5,
-                    (pred_necessary_budget - total_samples) * 1.1,
+                    (pred_necessary_budget - sampler.sample_cost) * 1.1,
                 )
 
                 # PROGRESS Logging ================================================
@@ -445,7 +364,7 @@ class IsotropicCovariance:
                         position=0,
                         leave=False,
                     )
-                    outer_pgb.update(total_samples)
+                    outer_pgb.update(sampler.sample_cost)
                 else:
                     outer_pgb.total = int(np.ceil(pred_necessary_budget))
                 outer_pgb.refresh()
@@ -456,12 +375,9 @@ class IsotropicCovariance:
                 self.var_reg,
                 bsize_counts,
             )
-            budget_use = sampler.sample(
-                needed_bsize_counts,
-                append_to=cached_samples,
-            )
+            used_budget = sampler.sample(needed_bsize_counts)
             if outer_pgb:
-                outer_pgb.update(budget_use)
+                outer_pgb.update(used_budget)
         if outer_pgb:
             outer_pgb.close()
 
@@ -469,7 +385,7 @@ class IsotropicCovariance:
 class SquaredExponential(IsotropicCovariance):
     """The Squared exponential covariance model. I.e.
 
-        C(x) = self.variance * exp(-x^2/(2*self.scale^2))
+        C(|x-y|^2/2) = self.variance * exp(-|x-y|^2/(2*self.scale^2))
 
     needs to be fitted using .auto_fit or .fit.
     """
@@ -477,8 +393,8 @@ class SquaredExponential(IsotropicCovariance):
     @property
     def variance(self):
         """the estimated variance (should only be accessed after fitting)"""
-        if self.fitted:
-            return self.var_reg.intercept_
+        if self._fitted:
+            return self.var_reg.intercept
         raise ArgumentError(
             "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
         )
@@ -486,21 +402,155 @@ class SquaredExponential(IsotropicCovariance):
     @property
     def scale(self):
         """the estimated scale (should only be accessed after fitting)"""
-        if self.fitted:
-            return np.sqrt(self.variance * self.dims / self.g_var_reg.intercept_)
+        if self._fitted:
+            return np.sqrt(self.variance * self.dims / self.g_var_reg.intercept)
         raise ArgumentError(
             "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
         )
 
-    def learning_rate(self, loss, grad_norm):
+    def kernel(self, neg_sq_half):
+        return self.variance * np.exp(neg_sq_half / (self.scale**2))
+
+    def diff_kernel(self, neg_sq_half):
+        return self.kernel(neg_sq_half) / (self.scale**2)
+
+    def diff2_kernel(self, neg_sq_half):
+        return self.kernel(neg_sq_half) / (self.scale**4)
+
+    def learning_rate(self, loss, grad_norm, *, b_size_inv=0, conservatism=0):
         """RFD learning rate from Random Function Descent paper"""
-        # numerically stable version
-        # (cf. https://en.wikipedia.org/wiki/Numerical_stability#Example)
-        # to avoid catastrophic cancellation in the difference
-        tmp = (self.mean - loss) / 2
-        return (self.scale**2) / (
-            torch.sqrt(tmp**2 + (self.scale * grad_norm) ** 2) + tmp
+        if conservatism != 0:  # Fallback
+            return super().learning_rate(
+                loss, grad_norm, b_size_inv=b_size_inv, conservatism=conservatism
+            )
+
+        var_reg = self.var_reg
+        g_var_reg = self.g_var_reg
+
+        # C(0)/(C(0) + 1/b * C_eps(0))
+        var_adjust = var_reg.intercept / var_reg(b_size_inv)
+        var_g_adjust = g_var_reg.intercept / g_var_reg(b_size_inv)
+
+        t1 = var_adjust * (self.mean - loss) / 2
+        t1 = t1 if t1 > 0 else 0  # stability
+        t2 = torch.sqrt(
+            torch.as_tensor(t1**2 + (self.scale * grad_norm * var_g_adjust) ** 2)
         )
+        return var_g_adjust * (self.scale**2) / (t2 + t1)
+
+
+class RationalQuadratic(IsotropicCovariance):
+    """The Squared exponential covariance model. I.e.
+
+        C(|x-y|^2/2) = self.variance * (1+ |x-y|^2/(2*self.scale^2))^(-self.beta/2)
+
+    needs to be fitted using .auto_fit or .fit.
+    """
+
+    __slots__ = ("beta",)
+
+    def __init__(self, *, beta, **kwargs):
+        self.beta = beta
+        super().__init__(**kwargs)  # calls _is_fitted, beta needs to be there
+
+    def _is_fitted(self):
+        return super()._is_fitted() and self.beta is not None
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(beta={self.beta}, " + self._repr_helper() + ")"
+        )
+
+    @property
+    def variance(self):
+        """the estimated variance (should only be accessed after fitting)"""
+        if self._fitted:
+            return self.var_reg.intercept
+        raise ArgumentError(
+            "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
+        )
+
+    @property
+    def scale(self):
+        """the estimated scale (should only be accessed after fitting)"""
+        if self._fitted:
+            return np.sqrt(self.variance * self.dims / self.g_var_reg.intercept)
+        raise ArgumentError(
+            "The covariance is not fitted yet, use `auto_fit` or `fit` before use"
+        )
+
+    def kernel(self, neg_sq_half):
+        inner = 1 - 2 * neg_sq_half / (self.beta * self.scale**2)
+        return self.variance * (inner ** (-self.beta / 2))
+
+    def diff_kernel(self, neg_sq_half):
+        inner = 1 - 2 * neg_sq_half / (self.beta * self.scale**2)
+        return (self.variance / self.scale**2) * (inner ** (-self.beta / 2 - 1))
+
+    def diff2_kernel(self, neg_sq_half):
+        inner = 1 - 2 * neg_sq_half / (self.beta * self.scale**2)
+
+        tmp = (self.variance / self.scale**4) * (1 + 2 / self.beta)
+        return tmp * (inner ** (-self.beta / 2 - 2))
+
+    def learning_rate(self, loss, grad_norm, *, b_size_inv=0, conservatism=0):
+        """RFD learning rate from Random Function Descent paper"""
+        if conservatism != 0:  # Fallback
+            return super().learning_rate(
+                loss, grad_norm, b_size_inv=b_size_inv, conservatism=conservatism
+            )
+
+        if grad_norm == 0:  # fast return
+            return 0
+        if loss >= self.mean:
+            # stability: do not exceed this learning rate (not step size!)
+            return self.scale * np.sqrt(self.beta / (1 + self.beta)) / grad_norm
+
+        # --- Stochastic RFD ---
+        var_reg = self.var_reg
+        g_var_reg = self.g_var_reg
+
+        # C(0)/(C(0) + 1/b * C_eps(0))
+        var_adjust = var_reg.intercept / var_reg(b_size_inv)
+        var_g_adjust = g_var_reg.intercept / g_var_reg(b_size_inv)
+
+        grad_cost_quot = var_adjust / var_g_adjust * grad_norm / (self.mean - loss)
+        # -------------------------
+
+        tmp = np.sqrt(self.beta) / (self.scale * grad_cost_quot)
+        polynomial = [-1, tmp, (1 + self.beta), tmp]
+        # careful opposite order than np.root expects!
+
+        minimum = bisection_incr(
+            func=lambda x: evaluate_polynomial(polynomial, x),
+            left=0,
+            right=1 / np.sqrt(1 + self.beta),  # confer paper
+        )
+
+        # learning rate, not step size!
+        return self.scale * np.sqrt(self.beta) * minimum / grad_norm
+
+
+def evaluate_polynomial(polynomial, x):
+    """evaluate a polynomial at x,
+
+    polynomial is a list of coefficients
+        where the index is the power of x
+    """
+    return sum(coeff * (x**idx) for idx, coeff in enumerate(polynomial))
+
+
+def bisection_incr(func, left, right, tol=1e-10):
+    """find the root of an increasing function on the interval [left, right]"""
+    while right - left > tol:
+        mid = (left + right) / 2
+        if func(mid) == 0:
+            return mid
+        if func(mid) > 0:
+            right = mid
+        else:
+            left = mid
+    return (left + right) / 2
 
 
 if __name__ == "__main__":
