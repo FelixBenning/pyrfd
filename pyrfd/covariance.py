@@ -121,7 +121,7 @@ class IsotropicCovariance:
         corr = self.kernel(neg_sq_half) / self.var_reg(b_size_inv)
         g_corr = stepsize * self.diff_kernel(neg_sq_half) / self.g_var_reg(b_size_inv)
 
-        return corr * (loss - self.mean) - g_corr * grad_norm
+        return self.mean + corr * (loss - self.mean) - g_corr * grad_norm
 
     def diff_cond_expectation(self, stepsize, loss, grad_norm, b_size_inv=0):
         """derivative of the conditional expectation of the cost given batch loss and gradient norm

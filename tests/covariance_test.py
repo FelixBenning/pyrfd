@@ -1,5 +1,8 @@
 import pytest
+import numpy as np
 from pyrfd.covariance import SquaredExponential
+
+rng = np.random.default_rng()
 
 @pytest.mark.parametrize("mean,var,scale", [
     (1,1,2),
@@ -24,4 +27,16 @@ def test_squared_exponential(mean, var, scale):
     
     if sorted(rates, reverse=True) != rates:
         raise AssertionError("Learning rates are not decreasing in conservatism")
+    
+    
+    for cost in [0, 0.1, mean, 3, -1]:
+        # taking a zero step size should not change the cost
+        assert cov.cond_expectation(0, cost, np.exp(rng.random())) == pytest.approx(cost)
+
+        # taking a zero step size implies that there is no conditional variance
+        # as the value is already known
+        assert cov.cond_variance(0) == pytest.approx(0)
+
+        # going really far away should imply that the conditional variance is the same as the variance
+        assert cov.cond_variance(1e12) == pytest.approx(var)
 
