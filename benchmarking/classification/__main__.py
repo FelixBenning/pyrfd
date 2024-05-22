@@ -152,6 +152,7 @@ def main(problem_name, opt):
                 hyperparameters={
                     "covariance_model": sq_exp_cov_model,
                     "b_size_inv": 1/problem["batch_size"],
+                    "conservatism": 0.1,
                 },
             )
             train(
@@ -159,6 +160,7 @@ def main(problem_name, opt):
                 opt=RFD,
                 hyperparameters={
                     "covariance_model": sq_exp_cov_model,
+                    "conservatism": 0.1,
                 },
             )
     
