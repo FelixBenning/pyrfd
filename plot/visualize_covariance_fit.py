@@ -53,7 +53,7 @@ def visualize_fit():
     fig.tight_layout()
     plt.savefig("plot/MNIST_CNN7_covariance_fit.pdf")
 
-def get_run_covariance(run):
+def get_run_covariance_and_cost(run):
     mnist = MNIST(batch_size=100)
     mnist.prepare_data()
     mnist.setup("fit")
@@ -67,17 +67,31 @@ def get_run_covariance(run):
     )
     cov_model.dims = sampler.dims
     cov_model.fit(sampler.snapshot_as_dataframe())
-    return cov_model
+    return cov_model, sampler.sample_cost
 
 def visualize_lr_variance():
     asympt_lr = []
+    sample_costs = []
     for run in range(20):
-        cov_model = get_run_covariance(run)
+        cov_model, sample_cost = get_run_covariance_and_cost(run)
+        if sample_cost > 100000:
+            print(f"run: {run}, sample_cost: {sample_cost}, asymptotic_lr: {cov_model.asymptotic_learning_rate()}")
         asympt_lr.append(cov_model.asymptotic_learning_rate())
+        sample_costs.append(sample_cost)
 
-    print(asympt_lr)
-    plt.hist(asympt_lr, label="Asymptotic learning rate")
+    # print(asympt_lr)
+    plt.figure(figsize=(4, 3))
+    plt.hist(asympt_lr)
+    plt.xlabel("Asymptotic learning rate")
+    plt.tight_layout()
     plt.savefig("plot/MNIST_CNN7_asymptotic_lr.pdf")
+
+    print(f"less_one_epoch: {len([cost for cost in sample_costs if cost < 60_000])}")
+    plt.figure(figsize=(4, 3))
+    plt.hist(sample_costs, label="Sample cost")
+    plt.xlabel("Sample cost")
+    plt.tight_layout()
+    plt.savefig("plot/MNIST_CNN7_sample_cost.pdf")
 
 
 if __name__ == "__main__":
