@@ -1,4 +1,6 @@
 import torch
+from torch.optim import Adam
+from benchmarking.classification.cifar.vgg import VGG, vgg16_bn
 from pyrfd.covariance import SquaredExponential
 from pyrfd.optimizer import RFD
 from torch.nn import CrossEntropyLoss
@@ -12,66 +14,110 @@ import optuna
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
 from optuna.integration import PyTorchLightningPruningCallback
+from lightning.pytorch.callbacks import EarlyStopping
+import argparse
 
 
-def objective(trial: Trial) -> float:
-    hyperparameters = dict()
+def objective(
+    trial: Trial, Optimizer: RFD | Adam, Model: Resnet18 | VGG, device: int
+) -> float:
+    # Global HPs
+    MAX_EPOCHS = 300
+    batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256, 512, 1024])
 
-    BATCH_SIZE = 64
-    TOL = 0.3
-    MAX_EPOCHS = 10
-
-    dm = CIFAR100(batch_size=BATCH_SIZE)
-    dm.prepare_data()
-    dm.setup("fit")
-
+    # Initialize loss and datamodule
     loss = CrossEntropyLoss()
+    dm = CIFAR100(batch_size=batch_size, num_workers=6)
 
-    sq_exp_cov_model = SquaredExponential()
-    sq_exp_cov_model.auto_fit(
-        model_factory=Resnet18,
-        loss=loss,
-        data=dm.data_train,
-        tol=TOL,
-        cache=f"""cache/{CIFAR100.__name__}/{Resnet18.__name__}/covariance_cache.csv""",
-    )
+    if Optimizer == RFD:
+        # Get training dataset ready
+        dm.prepare_data()
+        dm.setup("fit")
 
+        # Fit covariance model
+        sq_exp_cov_model = SquaredExponential()
+        sq_exp_cov_model.auto_fit(
+            model_factory=Model,
+            loss=loss,
+            data=dm.data_train,
+            tol=0.3,
+            cache=f"""cache/{CIFAR100.__name__}/{Model.__name__}/covariance_cache_2.csv""",
+        )
+
+        # Setup optimizer HPs
+        additional_classifier_kwargs = dict(
+            covariance_model=sq_exp_cov_model,
+            conservatism=trial.suggest_float("conservatism", 0.0, 1.0),
+        )
+    elif Optimizer == Adam:
+        # Setup optimizer HPs
+        additional_classifier_kwargs = dict(
+            lr=trial.suggest_float("lr", 1e-6, 1e-1, log=True),
+            weight_decay=trial.suggest_float("weight_decay", 1e-6, 1e-1, log=True),
+        )
+
+    # Initialize model
     classifier = Classifier(
-        model=Resnet18(),
-        optimizer=RFD,
-        loss=loss,
-        covariance_model=sq_exp_cov_model,
-        conservatism=0.1,
+        model=Model(), optimizer=Optimizer, loss=loss, **additional_classifier_kwargs
     )
 
-    # TODO
+    # Setup trainer
     trainer = Trainer(
-        devices=[0],
+        devices=[device],
         max_epochs=MAX_EPOCHS,
         logger=TensorBoardLogger(
             save_dir="lightning_logs",
             version=trial.number,
-            name=f"{CIFAR100.__name__}_{Resnet18.__name__}",
+            name=f"{CIFAR100.__name__}_{Model.__name__}_{Optimizer.__name__}",
         ),
         log_every_n_steps=5,
         check_val_every_n_epoch=1,
-        callbacks=[PyTorchLightningPruningCallback(trial, monitor="val/accuracy")],
+        callbacks=[
+            PyTorchLightningPruningCallback(trial, monitor="val/accuracy"),
+            EarlyStopping("val/accuracy", patience=5, mode="max", verbose=True),
+        ],
     )
-    trainer.logger.log_hyperparams(hyperparameters)
+    trainer.logger.log_hyperparams(
+        {
+            "batch_size": batch_size,
+            "max_epochs": MAX_EPOCHS,
+            **additional_classifier_kwargs,
+        }
+    )
+
+    # Fit model and keep validation accuracy
     trainer.fit(model=classifier, datamodule=dm)
+    val_accuracy = trainer.callback_metrics["val/accuracy"].item()
+
+    # Test model and store metrics
     trainer.test(model=classifier, datamodule=dm)
+    trial.set_user_attr(
+        "test_accuracy", trainer.callback_metrics["test/accuracy"].item()
+    )
+    trial.set_user_attr("test_loss", trainer.callback_metrics["test/loss"].item())
+    trial.set_user_attr("test_recall", trainer.callback_metrics["test/recall"].item())
+    trial.set_user_attr(
+        "test_precision", trainer.callback_metrics["test/precision"].item()
+    )
 
-    trial.set_user_attr("test_accuracy", trainer.callback_metrics["test/accuracy"])
-    trial.set_user_attr("test_loss", trainer.callback_metrics["test/loss"])
-    trial.set_user_attr("test_recall", trainer.callback_metrics["test/recall"])
-    trial.set_user_attr("test_precision", trainer.callback_metrics["test/precision"])
-
-    return trainer.callback_metrics["val/accuracy"].item()
+    # Return validation accuracy for HP optimization
+    return val_accuracy
 
 
 def main():
-    torch.set_float32_matmul_precision("high")
     SEED = 0
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--optimizer", type=str, choices=["RFD", "Adam"], required=True)
+    parser.add_argument("--model", type=str, choices=["Resnet18", "VGG"], required=True)
+    parser.add_argument("--device", type=int, required=True)
+    parser.add_argument("--timeout", type=int, default=3600)
+    args = parser.parse_args()
+
+    Optimizer = RFD if args.optimizer == "RFD" else Adam
+    Model = Resnet18 if args.model == "Resnet18" else vgg16_bn
+
+    torch.set_float32_matmul_precision("high")
     seed_everything(SEED)
 
     pruner = MedianPruner()
@@ -79,12 +125,17 @@ def main():
 
     study = optuna.create_study(
         storage="sqlite:///optuna.db",
+        study_name=f"{CIFAR100.__name__}_{Model.__name__}_{Optimizer.__name__}",
+        load_if_exists=True,
         pruner=pruner,
         sampler=sampler,
         direction="maximize",
     )
 
-    study.optimize(objective, timeout=10)
+    study.optimize(
+        lambda trial: objective(trial, Optimizer, Model, args.device),
+        timeout=args.timeout,
+    )
 
 
 main()
