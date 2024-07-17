@@ -9,10 +9,13 @@ import lightning as L
 class CIFAR100(L.LightningDataModule):
     """Represents the CIFAR100 dataset."""
 
-    def __init__(self, data_dir: str = "./data/CIFAR", batch_size: int = 100) -> None:
+    def __init__(
+        self, data_dir: str = "./data/CIFAR", batch_size: int = 128, num_workers=0
+    ) -> None:
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
+        self.num_workers = num_workers
         # cifar 100 has 60000 32x32 color images (600 images per class)
         cifar100_mean = (0.4914, 0.4822, 0.4465)
         cifar100_stddev = (0.2023, 0.1994, 0.2010)
@@ -78,13 +81,24 @@ class CIFAR100(L.LightningDataModule):
             )
 
     def train_dataloader(self):
-        return DataLoader(self.data_train, batch_size=self.batch_size, shuffle=True)
+        return DataLoader(
+            self.data_train,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+        )
 
     def val_dataloader(self):
-        return DataLoader(self.data_val, batch_size=self.batch_size)
+        return DataLoader(
+            self.data_val, batch_size=self.batch_size, num_workers=self.num_workers
+        )
 
     def test_dataloader(self):
-        return DataLoader(self.data_test, batch_size=self.batch_size)
+        return DataLoader(
+            self.data_test, batch_size=self.batch_size, num_workers=self.num_workers
+        )
 
     def predict_dataloader(self):
-        return DataLoader(self.data_predict, batch_size=self.batch_size)
+        return DataLoader(
+            self.data_predict, batch_size=self.batch_size, num_workers=self.num_workers
+        )
