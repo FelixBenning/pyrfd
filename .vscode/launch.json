@@ -5,6 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Debugger: Benchmarking Module",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/benchmarking/classification/__main__.py",
+            "args": "${command:pickArgs}"
+        },
+        {
             "name": "debug pyrfd",
             "type": "debugpy",
             "request": "launch",

@@ -39,3 +39,6 @@ jobs:
         poetry run pylint pyrfd
         poetry run flake8 pyrfd
         poetry run black --check pyrfd
+      
+    - name: Run tests
+      run: poetry run pytest tests
