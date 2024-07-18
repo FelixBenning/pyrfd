@@ -3,6 +3,9 @@ from torch.optim import Adam
 from benchmarking.classification.cifar.batch_norm_cnn import BatchNormCNN
 from benchmarking.classification.cifar.simple_cnn import SimpleCNN
 from benchmarking.classification.cifar.simplest_cnn import SimplestCNN
+from benchmarking.classification.cifar.simplest_cnn_bn_everywhere import (
+    SimplestCNNBNEverywhere,
+)
 from benchmarking.classification.cifar.simplest_cnn_bn_last import SimplestCNNBNLast
 from benchmarking.classification.cifar.vgg import VGG, vgg16_bn
 from pyrfd.covariance import SquaredExponential
@@ -25,7 +28,15 @@ import argparse
 def objective(
     trial: Trial,
     Optimizer: RFD | Adam,
-    Model: Resnet18 | VGG | SimpleCNN | BatchNormCNN | SimplestCNN | SimplestCNNBNLast,
+    Model: (
+        Resnet18
+        | VGG
+        | SimpleCNN
+        | BatchNormCNN
+        | SimplestCNN
+        | SimplestCNNBNLast
+        | SimplestCNNBNEverywhere
+    ),
     device: int,
     tolerance: float,
 ) -> float:
@@ -56,7 +67,6 @@ def objective(
         # Setup optimizer HPs
         additional_classifier_kwargs = dict(
             covariance_model=sq_exp_cov_model,
-            conservatism=trial.suggest_float("conservatism", 0.0, 1.0),
         )
     elif Optimizer == Adam:
         # Setup optimizer HPs
@@ -129,6 +139,7 @@ def main():
             "BatchNormCNN",
             "SimplestCNN",
             "SimplestCNNBNLast",
+            "SimplestCNNBNEverywhere",
         ],
         required=True,
     )
@@ -155,6 +166,8 @@ def main():
         Model = SimplestCNN
     elif args.model == "SimplestCNNBNLast":
         Model = SimplestCNNBNLast
+    elif args.model == "SimplestCNNBNEverywhere":
+        Model = SimplestCNNBNEverywhere
     else:
         raise ValueError("Invalid model specified")
 
