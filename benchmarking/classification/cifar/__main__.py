@@ -1,5 +1,9 @@
 import torch
 from torch.optim import Adam
+from benchmarking.classification.cifar.batch_norm_cnn import BatchNormCNN
+from benchmarking.classification.cifar.simple_cnn import SimpleCNN
+from benchmarking.classification.cifar.simplest_cnn import SimplestCNN
+from benchmarking.classification.cifar.simplest_cnn_bn_last import SimplestCNNBNLast
 from benchmarking.classification.cifar.vgg import VGG, vgg16_bn
 from pyrfd.covariance import SquaredExponential
 from pyrfd.optimizer import RFD
@@ -19,7 +23,11 @@ import argparse
 
 
 def objective(
-    trial: Trial, Optimizer: RFD | Adam, Model: Resnet18 | VGG, device: int
+    trial: Trial,
+    Optimizer: RFD | Adam,
+    Model: Resnet18 | VGG | SimpleCNN | BatchNormCNN | SimplestCNN | SimplestCNNBNLast,
+    device: int,
+    tolerance: float,
 ) -> float:
     # Global HPs
     MAX_EPOCHS = 300
@@ -40,8 +48,9 @@ def objective(
             model_factory=Model,
             loss=loss,
             data=dm.data_train,
-            tol=0.3,
+            tol=tolerance,
             cache=f"""cache/{CIFAR100.__name__}/{Model.__name__}/covariance_cache_2.csv""",
+            max_iter=20,
         )
 
         # Setup optimizer HPs
@@ -109,13 +118,45 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--optimizer", type=str, choices=["RFD", "Adam"], required=True)
-    parser.add_argument("--model", type=str, choices=["Resnet18", "VGG"], required=True)
+    parser.add_argument("--tolerance", type=float, default=0.3)
+    parser.add_argument(
+        "--model",
+        type=str,
+        choices=[
+            "Resnet18",
+            "VGG",
+            "SimpleCNN",
+            "BatchNormCNN",
+            "SimplestCNN",
+            "SimplestCNNBNLast",
+        ],
+        required=True,
+    )
     parser.add_argument("--device", type=int, required=True)
     parser.add_argument("--timeout", type=int, default=3600)
     args = parser.parse_args()
 
-    Optimizer = RFD if args.optimizer == "RFD" else Adam
-    Model = Resnet18 if args.model == "Resnet18" else vgg16_bn
+    if args.optimizer == "RFD":
+        Optimizer = RFD
+    elif args.optimizer == "Adam":
+        Optimizer = Adam
+    else:
+        raise ValueError("Invalid optimizer specified")
+
+    if args.model == "Resnet18":
+        Model = Resnet18
+    elif args.model == "VGG":
+        Model = vgg16_bn
+    elif args.model == "SimpleCNN":
+        Model = SimpleCNN
+    elif args.model == "BatchNormCNN":
+        Model = BatchNormCNN
+    elif args.model == "SimplestCNN":
+        Model = SimplestCNN
+    elif args.model == "SimplestCNNBNLast":
+        Model = SimplestCNNBNLast
+    else:
+        raise ValueError("Invalid model specified")
 
     torch.set_float32_matmul_precision("high")
     seed_everything(SEED)
@@ -133,7 +174,7 @@ def main():
     )
 
     study.optimize(
-        lambda trial: objective(trial, Optimizer, Model, args.device),
+        lambda trial: objective(trial, Optimizer, Model, args.device, args.tolerance),
         timeout=args.timeout,
     )
 
