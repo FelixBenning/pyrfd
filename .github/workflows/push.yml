@@ -52,5 +52,5 @@ jobs:
     - name: Upload HTML results
       uses: actions/upload-artifact@v4
       with:
-        name: Test Coverage Report
+        name: Test Coverage Report ${{matrix.python-version}}
         path: htmlcov
