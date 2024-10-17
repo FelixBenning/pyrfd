@@ -1,5 +1,8 @@
 # pyrfd
 
+[![PyPI version](https://badge.fury.io/py/pyrfd.svg)](https://badge.fury.io/py/pyrfd)
+[![codecov](https://codecov.io/gh/FelixBenning/pyrfd/graph/badge.svg?token=DaSPgLnZRc)](https://codecov.io/gh/FelixBenning/pyrfd)
+
 Pytorch implementation of RFD (see [arXiv](https://arxiv.org/abs/2305.01377))
 
 ## Covariance model
