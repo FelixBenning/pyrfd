@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pyrfd"
-version = "0.1.0"
+version = "1.0.0"
 description = ""
 authors = ["Felix Benning <felix.benning@gmail.com>"]
 readme = "README.md"
