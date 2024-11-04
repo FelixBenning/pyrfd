@@ -261,17 +261,33 @@ SummaryKeys = {
 
 def plot_summary(problem):
     problem_dir = Path(f"logs/{problem}")
-    wanted = ["RFD(SE)", "S-RFD(SE)", "RFD(RQ(beta=1))", "A-RFD", "RFD(SE)-Conservative", "S-RFD(SE)-Conservative"]
+    wanted = [
+        "RFD(SE)",
+        # "S-RFD(SE)",
+        # "RFD(RQ(beta=1))",
+        "A-RFD",
+        # "RFD(SE)-Conservative",
+        # "S-RFD(SE)-Conservative"
+    ]
     metrics = extract_metrics(problem_dir, plot_filter(wanted))
     (fig, axs) = plt.subplots(2, 2, figsize=(9, 6))
+    (fig_validation, axs_validation) = plt.subplots(figsize=(6, 4))
+    (fig_learning_rate, axs_learning_rate) = plt.subplots(figsize=(6, 4))
+    (fig_tuning, axs_tuning) = plt.subplots(figsize=(6, 4))
     for (idx, item) in enumerate(metrics):
         plot_validation_loss(axs[0,0], item, idx=idx)
+        plot_validation_loss(axs_validation, item, idx=idx)
+
         plot_initial_learning_rate(axs[1,0], item, idx=idx)
+        plot_initial_learning_rate(axs_learning_rate, item, idx=idx)
+
         plot_step_size(axs[1,1], item, idx=idx)
 
     metrics = extract_metrics(problem_dir, plot_filter(SummaryKeys.get(problem, [])))
     for (idx, item) in enumerate(metrics, start=len(wanted)):
         plot_validation_loss(axs[0,0], item, idx=idx)
+        plot_validation_loss(axs_validation, item, idx=idx)
+
         plot_step_size(axs[1,1], item, idx=idx)
 
     adam_metrics = extract_metrics(problem_dir, {"Adam": {"includes": ["Adam"]}})
@@ -281,11 +297,23 @@ def plot_summary(problem):
     sgd_joined = pd.concat([spread_lr(x["metrics"]) for x in  sgd_metrics])
 
     plot_final_loss_over_lr(axs[0, 1], {"name": "SGD", "metrics": sgd_joined}, idx=len(wanted))
+    plot_final_loss_over_lr(axs_tuning, {"name": "SGD", "metrics": sgd_joined}, idx=len(wanted))
     plot_final_loss_over_lr(axs[0, 1], {"name": "Adam", "metrics": adam_joined}, idx=len(wanted)+1)
+    plot_final_loss_over_lr(axs_tuning, {"name": "Adam", "metrics": adam_joined}, idx=len(wanted)+1)
     axs[0,1].legend()
+    axs_tuning.legend()
 
     fig.tight_layout()
-    plt.savefig(f"plot/{problem}_summary.pdf")
+    fig.savefig(f"plot/{problem}_summary.pdf")
+
+    fig_validation.tight_layout()
+    fig_validation.savefig(f"plot/{problem}_validation_loss.pdf")
+
+    fig_learning_rate.tight_layout()
+    fig_learning_rate.savefig(f"plot/{problem}_learning_rate.pdf")
+
+    fig_tuning.tight_layout()
+    fig_tuning.savefig(f"plot/{problem}_tuning.pdf")
 
 def plot_performance(problem):
     problem_dir = Path(f"logs/{problem}")
@@ -340,7 +368,6 @@ def main():
         plot_summary(problem)
         # plot_performance(problem)
         # plot_step_behavior(problem)
-
 
 if __name__ == "__main__":
     main()
