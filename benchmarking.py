@@ -10,7 +10,7 @@ from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 
 # pylint: disable=import-error,wrong-import-order
 from classification.cifar.data import CIFAR100
-from classification.cifar.resnet18 import Resnet18
+from classification.cifar.models import Resnet18
 from classification.mnist.data import MNIST, FashionMNIST
 from classification.mnist.models import CNN3, CNN5, CNN7, AlgoPerf  # pylint: disable=unused-import
 from classification.classifier import Classifier
