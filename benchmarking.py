@@ -9,11 +9,11 @@ import sys
 from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 
 # pylint: disable=import-error,wrong-import-order
-from benchmarking.classification.cifar.data import CIFAR100
-from benchmarking.classification.cifar.resnet18 import Resnet18
-from benchmarking.classification.mnist.data import MNIST, FashionMNIST
-from benchmarking.classification.mnist.models import CNN3, CNN5, CNN7, AlgoPerf  # pylint: disable=unused-import
-from benchmarking.classification.classifier import Classifier
+from classification.cifar.data import CIFAR100
+from classification.cifar.resnet18 import Resnet18
+from classification.mnist.data import MNIST, FashionMNIST
+from classification.mnist.models import CNN3, CNN5, CNN7, AlgoPerf  # pylint: disable=unused-import
+from classification.classifier import Classifier
 
 from pyrfd import RFD, covariance
 
