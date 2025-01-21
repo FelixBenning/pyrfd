@@ -9,10 +9,35 @@ from .covariance import IsotropicCovariance
 
 
 class RFD(Optimizer):
-    """Random Function Descent (RFD) optimizer"""
+    """Random Function Descent (RFD) optimizer
 
-    def __init__(self, params, *, covariance_model: IsotropicCovariance, momentum=0):
-        defaults = {"cov": covariance_model, "momentum": momentum}
+    To enable the usage of step size schedulers, the `lr` parameter is multiplied
+    to the statistically determined step size (i.e. default `1`)
+    """
+
+    # pylint: disable=too-many-arguments
+    def __init__(
+        self,
+        params,
+        *,
+        covariance_model: IsotropicCovariance,
+        momentum=0,
+        lr=1,
+        b_size_inv=0,
+        conservatism=0,
+        norm_lock=False,
+    ):
+        defaults = {
+            "cov": covariance_model,
+            "momentum": momentum,
+            "lr": lr,  # really a learning rate multiplier,
+            # but this name ensures compatibility with schedulers
+            "learning_rate": None,
+            "b_size_inv": b_size_inv,
+            "norm_lock": norm_lock,
+            "conservatism": conservatism,
+        }
+
         super().__init__(params, defaults)
 
     def step(self, closure):  # pylint: disable=locally-disabled, signature-differs
@@ -23,6 +48,7 @@ class RFD(Optimizer):
                 and returns the loss.
         """
         loss = None
+
         with torch.enable_grad():
             loss = closure()
             # we assume here, that the person using the optimizer has used
@@ -30,7 +56,6 @@ class RFD(Optimizer):
             # autograd to build a tree which we can
 
         with torch.no_grad():
-
             for group in self.param_groups:
                 grads = [
                     param.grad.detach().flatten()
@@ -40,10 +65,18 @@ class RFD(Optimizer):
                 grad_norm = torch.cat(grads).norm()
 
                 momentum = group["momentum"]
+                norm_lock = group["norm_lock"]
 
                 cov_model: IsotropicCovariance = group["cov"]
-                lr = cov_model.learning_rate(loss, grad_norm)
+                learning_rate = group["lr"] * cov_model.learning_rate(
+                    loss,
+                    grad_norm,
+                    b_size_inv=group["b_size_inv"],
+                    conservatism=group["conservatism"],
+                )
+                group["learning_rate"] = learning_rate
 
+                param: torch.Tensor
                 for param in group["params"]:
                     state = self.state[param]
                     if param.grad is not None:
@@ -55,7 +88,16 @@ class RFD(Optimizer):
                         else:
                             velocity = torch.mul(param.grad, -1)
 
-                        param += lr * velocity  # add velocity to parameters in-place!
+                        if norm_lock:
+                            param_norm = param.norm()
+
+                        # add velocity to parameters in-place!
+                        param += learning_rate * velocity
+
+                        if norm_lock:
+                            # project back to the original sphere
+                            param.mul_(param_norm / param.norm())
+
                         state["velocity"] = velocity
 
         return loss

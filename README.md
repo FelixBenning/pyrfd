@@ -1,6 +1,9 @@
 # pyrfd
 
-Pytorch implementation of RFD
+[![PyPI version](https://badge.fury.io/py/pyrfd.svg)](https://badge.fury.io/py/pyrfd)
+[![codecov](https://codecov.io/gh/FelixBenning/pyrfd/graph/badge.svg?token=DaSPgLnZRc)](https://codecov.io/gh/FelixBenning/pyrfd)
+
+Pytorch implementation of RFD (see [arXiv](https://arxiv.org/abs/2305.01377))
 
 ## Covariance model
 
@@ -22,8 +25,7 @@ pytorch optimizer interface. The end result can be used like `torch.optim.Adam`
 ## Example usage
 
 ```python
-from mnistSimpleCNN.models.modelM3 import ModelM3
-# cf. mnistSimpleCNN directory (example model)
+from benchmaking.classification.mnist.models.cnn3 import CNN3
 
 import torch
 import torchvision as tv
@@ -32,7 +34,7 @@ from pyrfd import RFD, SquaredExponential
 
 cov_model = SquaredExponential()
 cov_model.auto_fit(
-    model_factory=ModelM3,
+    model_factory=CNN3,
     loss=torch.nn.functional.nll_loss,
     data= tv.datasets.MNIST(
         root="mnistSimpleCNN/data",
@@ -43,7 +45,25 @@ cov_model.auto_fit(
     # should be unique for (models, data, loss)
 )
 rfd = RFD(
-    ModelM3().parameters(),
+    CNN3().parameters(),
     covariance_model=cov_model
 )
 ```
+
+## How to cite
+
+
+```bibtex
+@inproceedings{benningRandomFunctionDescent2024,
+  title = {Random {{Function Descent}}},
+  booktitle = {Advances in {{Neural Information Processing Systems}}},
+  author = {Benning, Felix and D{\"o}ring, Leif},
+  year = {2024},
+  month = dec,
+  volume = {37},
+  primaryclass = {cs, math, stat},
+  publisher = {Curran Associates, Inc.},
+  address = {Vancouver, Canada},
+}
+```
+
