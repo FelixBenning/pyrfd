@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 from benchmarking.classification.mnist.models import CNN7
 from benchmarking.classification.mnist.data import MNIST
-from pyrfd import sampling, covariance
+from pyrfd import sampling, covariance, plots
 
 rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
 plt.rcParams.update({
@@ -51,7 +51,19 @@ def visualize_fit():
         batch_sizes=[10,100,1000]
     )
     fig.tight_layout()
-    plt.savefig("plot/MNIST_CNN7_covariance_fit.pdf")
+    fig.savefig("plot/MNIST_CNN7_covariance_fit.pdf")
+
+    fig_sq_regression, ax_sq_regression = plt.subplots(figsize=(6, 4))
+    plots.plot_squared_losses(
+        ax_sq_regression,
+        sampler.snapshot_as_dataframe(),
+        mean= cov_model.mean,
+        var_reg= cov_model.var_reg
+    )
+    fig_sq_regression.savefig("plot/MNIST_CNN7_squared_regression.pdf")
+
+
+
 
 def get_run_covariance_and_cost(run):
     mnist = MNIST(batch_size=100)

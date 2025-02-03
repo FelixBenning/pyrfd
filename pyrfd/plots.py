@@ -32,7 +32,7 @@ def plot_loss(ax, df: pd.DataFrame, *, mean, var_reg: ScalarRegression):
         1 / reduced_df["batchsize"],
         reduced_df["loss"],
         s=1,  # marker size
-        label=r"$\mathcal{L}_b(w)$",
+        label=r"$\mathbf{J}_b(w)$",
     )
 
     ### STATISTICAL PLOTS ###
@@ -112,7 +112,7 @@ def plot_squared_losses(ax, df: pd.DataFrame, *, mean, var_reg):
         1 / reduced_df["batchsize"],
         (reduced_df["loss"] - mean) ** 2,
         s=1,  # marker size
-        label=r"$(\mathcal{L}_b(w)-\hat{\mu})^2$",
+        label=r"$(\mathbf{J}_b(w)-\hat{\mu})^2$",
     )
 
     ### STATISTICAL PLOTS ###
@@ -141,7 +141,7 @@ def plot_squared_losses(ax, df: pd.DataFrame, *, mean, var_reg):
     ax.plot(
         b_size_inv,
         var_estimates,
-        label=r"Var$(\mathcal{L}_b(w))$",
+        label=r"Var$(\mathbf{J}_b(w))$",
     )
 
     # 95% - confidence intervals based on squared Gaussian (i.e. Chi2 distribution)
@@ -197,7 +197,7 @@ def plot_gradient_norms(ax, df: pd.DataFrame, *, g_var_reg: ScalarRegression, di
         1 / reduced_df["batchsize"],
         reduced_df["grad_norm"] ** 2,
         s=1,  # marker size
-        label=r"$\|\nabla\mathcal{L}_b(w)\|^2$",
+        label=r"$\|\nabla\mathbf{J}_b(w)\|^2$",
     )
 
     ### STATISTICAL PLOTS ###
@@ -225,7 +225,7 @@ def plot_gradient_norms(ax, df: pd.DataFrame, *, g_var_reg: ScalarRegression, di
     ax.plot(
         b_size_inv,
         sq_norm_means,
-        label=r"$\mathbb{E}[\|\nabla\mathcal{L}_b(w)\|^2]$",
+        label=r"$\mathbb{E}[\|\nabla\mathbf{J}_b(w)\|^2]$",
     )
 
     # confidence intervals based on sums of squared Gaussians (i.e. chi2(dims))
