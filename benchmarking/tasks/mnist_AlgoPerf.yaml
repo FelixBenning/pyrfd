@@ -1,0 +1,10 @@
+!ClassificationTask
+model: !classification.mnist.models.AlgoPerf {}
+dataset: !classification.mnist.data.MNIST
+  batch_size: 128,
+loss: !torch.nn.NLLLoss {}
+seed: 42,
+tol: 0.3,
+training: 
+  max_epochs: 30,
+  log_every_n_steps: 1,

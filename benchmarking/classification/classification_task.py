@@ -1,23 +1,12 @@
 """ ClassificationTask serialization """
 
+from itertools import product
 from pydoc import locate
-from sys import stdout
-from typing import Any
 from attr import dataclass
 import yaml
 
 from torch import nn
 import lightning as L
-
-
-@dataclass
-class Params(dict):
-    """Parameter dictionaries for ClasisficationTask"""
-
-    dataset: dict[str, Any] = {}
-    model: dict[str, Any] = {}
-    loss: dict[str, Any] = {}
-    training: dict[str, Any] = {}
 
 
 def full_name(cls):
@@ -35,13 +24,14 @@ def strip_exclamation(tag: str) -> str:
     assert tag.startswith("!"), f"Tag {tag} does not start with '!'"
     return tag[1:]
 
-
 @dataclass
 class ClassificationTask:
+    """ A classification task represented by a model, dataset, loss function and parameters
+    """
     model_class: type[nn.Module]
     dataset_class: type[L.LightningDataModule]
     loss_class: type[nn.Module] = nn.CrossEntropyLoss
-    params: dict = {}
+    params: dict= {}
 
     @property
     def loss(self):
@@ -115,4 +105,4 @@ if __name__ == "__main__":
     with open("task.yaml", "r", encoding="utf-8") as file:
         task = yaml.load(file, Loader=yaml.FullLoader)
     
-    yaml.dump(task, stdout)
+    # yaml.dump(task, stdout)

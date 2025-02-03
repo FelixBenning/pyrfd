@@ -50,69 +50,6 @@ def trainer_from_problem(problem, opt_name, hyperparameters):
     )
 
 
-PROBLEMS = {
-    "FashionMNIST_CNN5" : {
-        "dataset": FashionMNIST,
-        "model": CNN5,
-        "loss": F.nll_loss,
-        "batch_size": 128,
-        "seed": 42,
-        "tol": 0.3,
-        "trainer_params": {
-            "max_epochs": 30,
-            "log_every_n_steps": 1,
-        }
-    },
-    "MNIST_AlgoPerf":{
-        "dataset": MNIST,
-        "model": AlgoPerf,
-        "loss": F.nll_loss,
-        "batch_size": 128,
-        "seed": 42,
-        "tol": 0.3,
-        "trainer_params": {
-            "max_epochs": 30,
-            "log_every_n_steps": 1,
-        }
-    },
-    "MNIST_CNN3" : {
-        "dataset": MNIST,
-        "model": CNN3,
-        "loss": F.nll_loss,
-        "batch_size": 128,
-        "seed": 42,
-        "tol": 0.3,
-        "trainer_params": {
-            "max_epochs": 30,
-            "log_every_n_steps": 1,
-        }
-    },
-    "MNIST_CNN7" : {
-        "dataset": MNIST,
-        "model": CNN7,
-        "loss": F.nll_loss,
-        "batch_size": 1024,
-        "seed": 42,
-        "tol": 0.3,
-        "trainer_params": {
-            "max_epochs": 30,
-            "log_every_n_steps": 1,
-        }
-    },
-    "CIFAR100_resnet18": {
-        "dataset": CIFAR100,
-        "model": Resnet18,
-        "loss": nn.CrossEntropyLoss(label_smoothing=0),
-        "batch_size": 1024,
-        "seed": 42,
-        "tol": 0.3,
-        "trainer_params": {
-            "max_epochs": 50,
-            "log_every_n_steps": 5,
-        }
-    },
-}
-
 def main(problem_name, opt):
     problem = PROBLEMS[problem_name]
 

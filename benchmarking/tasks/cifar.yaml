@@ -1,0 +1,12 @@
+!ClassificationTask
+model: !classification.cifar.models.Resnet18 {}
+dataset: !classification.cifar.data.CIFAR100 {
+  batch_size: 1024,
+}
+loss: !torch.nn.CrossEntropyLoss
+  label_smoothing: 0
+seed: 42,
+tol: 0.3,
+training:
+  max_epochs: 50,
+  log_every_n_steps: 5,

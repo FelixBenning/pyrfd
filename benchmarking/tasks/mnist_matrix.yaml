@@ -1,0 +1,23 @@
+!ClassificationTask
+model: [
+  !classification.mnist.models.CNN3 {},
+  !classification.mnist.models.CNN5 {},
+  !classification.mnist.models.CNN7 {},
+  !classification.mnist.models.AlgoPerf {}
+]
+dataset: [
+  !classification.mnist.data.FashionMNIST
+    batch_size: 128,
+  !classification.mnist.data.MNIST
+    batch_size: 128,
+  !classification.mnist.data.MNIST
+    batch_size: 1024,
+]
+loss: !torch.nn.NLLLoss {}
+seed: 42,
+training:
+  tol: 0.3,
+  trainer_params: {
+      "max_epochs": 30,
+      "log_every_n_steps": 1,
+  }

@@ -1,0 +1,7 @@
+!ClassificationTask
+model: !classification.mnist.models.cnn3.CNN3 {}
+dataset: !classification.mnist.data.MNIST {}
+loss: !torch.nn.modules.loss.CrossEntropyLoss {}
+seed: 
+training:
+  batch_size: 128
