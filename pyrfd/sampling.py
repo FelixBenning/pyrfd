@@ -5,13 +5,20 @@ Module for sampling the loss at different batch sizes for covariance estimation.
 from __future__ import annotations
 from abc import abstractmethod
 
+from dataclasses import dataclass, asdict
 import time
 from pathlib import Path
 from logging import warning
+from typing import Iterable
 
 import pandas as pd
 import torch
+from torch import nn
+from torch.nn import functional as F
+from torch.utils.data import DataLoader, RandomSampler
 from tqdm import tqdm
+
+from pyrfd import batchsize
 
 
 def budget_use(bsize_counts):
@@ -82,44 +89,95 @@ class CSVSampleCache(SampleCache):
             Path(self.filename).parent.mkdir(parents=True, exist_ok=True)
             pd.DataFrame(self._records).to_csv(self.filename, index=False)
 
+@dataclass
+class Sample:
+    radius: torch.Tensor
+    loss: torch.Tensor
+    dx: torch.Tensor
+    perp_norm: torch.Tensor
+
+    def dict(self):
+        return {k: str(v) for k, v in asdict(self).items()}
+
+class Plist:
+    def __init__(self, params: Iterable[nn.Parameter]):
+        object.__setattr__(self, "params", params)
+
+    def __getattr__(self, name):
+        return [getattr(param, name) for param in self.params]
+
+    def __setattr__(self, name, value: Iterable[nn.Parameter]):
+        for param, v in zip(self.params, value):
+            setattr(param, name, v)
+
+    def __iter__(self):
+        return iter(self.params)
+
+def norm(params: Iterable[nn.Parameter]):
+    return torch.cat([param.detach().flatten() for param in params]).norm(p=2)
+
+def dot(params1: Iterable[nn.Parameter], params2: Iterable[nn.Parameter]):
+    return sum(
+        torch.dot(param1.flatten(), param2.flatten())
+        for param1, param2 in zip(params1, params2)
+    )
+
+@torch.no_grad()
+def normalize(model: nn.Module, radius=torch.tensor(1.0)):
+    """normalize the parameters of the model to lenght radius (default=1)"""
+    if radius is None:
+        return model
+    param_norm = norm(model.parameters())
+    for param in model.parameters():
+        param *= radius / param_norm
+    return model
+
+    # assert torch.isclose(norm(model.parameters()), radius) # debug
+
+@torch.no_grad()
+def decomp_grad(params: Plist):
+    """decompose gradient of params into orthogonal components
+    returns dx (the component of the gradient in the direction of the parameters)
+    stores the orthogonal component of the gradient in the grad_perp attribute of the parameters
+    """
+    param_norm = norm(params)
+    for param in params:
+        param.hat = param / param_norm
+
+    dx = dot(params.grad, params.hat)
+    for param in params:
+        param.grad_perp = param.grad - dx * param.hat
+
+    return dx
+
+
+
 
 class IsotropicSampler:
     """Sampling the loss function under the isotropy assumption (i.e. randomly
     samples inputs and does not treat them differently)"""
 
     def __init__(
-        self, model_factory, loss, data, cache: SampleCache | str | None = None
+        self,
+        model_factory,
+        loss,
+        data,
+        cache: SampleCache | str | None = None,
+        seed=None,
     ) -> None:
+        self.model_factory = model_factory
+        self.data = data
+        self.loss = loss
+        self.generator = torch.Generator()
+        if seed is not None:
+            self.generator.manual_seed(seed)
+
         if isinstance(cache, str):
             cache = CSVSampleCache(cache)
         self.cache = cache
         self._dims = sum(
             p.numel() for p in model_factory().parameters() if p.requires_grad
         )
-
-        def loader(b_size):
-            return torch.utils.data.DataLoader(data, batch_size=b_size, shuffle=True)
-
-        def loss_sample(input_x, target_y):
-            model = model_factory()
-            # this is a weird way to set the gradients to zero but pytorch...
-            torch.optim.SGD(model.parameters()).zero_grad()
-            with torch.enable_grad():
-                prediction = model(input_x)
-                sample_loss = loss(prediction, target_y)
-                sample_loss.backward()
-
-            with torch.no_grad():
-                grads = [
-                    param.grad.detach().flatten()
-                    for param in model.parameters()
-                    if param.grad is not None
-                ]
-                grad_norm = torch.cat(grads).norm()
-            return sample_loss.item(), grad_norm.item()
-
-        self.loader = loader
-        self.loss_sample = loss_sample
 
     def snapshot_as_dataframe(self):
         """Returns a copy of the current samples in the form of a dataframe"""
@@ -149,6 +207,36 @@ class IsotropicSampler:
         """calculate the cost of sampling the batchsize counts"""
         return budget_use(self.bsize_counts)
 
+    def loader(self, batch_size, num_samples):
+        sampler = RandomSampler(
+            data_source=self.data,
+            replacement=True,
+            generator=self.generator,
+            num_samples=batch_size * num_samples,
+        )
+        return DataLoader(self.data, batch_size=batch_size, sampler=sampler)
+    
+    @torch.enable_grad()
+    def loss_and_grad(self, model: nn.Module, x: torch.Tensor, y: torch.Tensor):
+        """ compute the loss and gradient"""
+        prediction = model(x)
+        loss = self.loss(prediction, y)
+        loss.backward()
+        return loss
+
+    def loss_and_grad_sample(self, x, y, radius=None):
+        model = normalize(self.model_factory(), radius)
+        model.zero_grad()
+        loss = self.loss_and_grad(model, x, y)
+
+        params = Plist(list(model.parameters()))
+        dx = decomp_grad(params)
+        perp_norm = norm(params.grad_perp)
+        # print(f"{dx=}, {perp_norm=}, grad_norm={norm(params.grad)}")
+        # assert torch.isclose(norm(params.grad), torch.tensor((perp_norm, dx)).norm())
+        # assert torch.isclose(dot(params, params.grad_perp), torch.tensor(0.))
+        return Sample(norm(params), loss, dx, perp_norm)
+
     def sample(self, bsize_counts: pd.Series):
         """sample the batchsize counts and append them to the cached samples
         (which are used as a context manager to allow for KeyboardInterupt)"""
@@ -156,40 +244,22 @@ class IsotropicSampler:
             self.cache = CSVSampleCache()
 
         budget = budget_use(bsize_counts)
-        with self.cache as records:
-            with tqdm(
-                total=budget,
-                unit="samples",
-                desc="Loss/gradient sampling",
-                position=1,
-                leave=False,
-            ) as progress:
-                for b_size, count in bsize_counts.items():
-                    self._sample_batchloss(
-                        b_size, count, append_to=records, progress=progress
-                    )
+        pbar = tqdm(
+            total=budget,
+            unit="samples",
+            desc="Loss/gradient sampling",
+            position=1,
+            leave=False,
+        )
+        with self.cache as records, pbar as progress:
+            for b_size, count in bsize_counts.items():
+                data_loader = self.loader(b_size, count)
+                for x,y in data_loader:
+                    records.append(dict(
+                        time= time.time(),
+                        batchsize= b_size,
+                        **self.loss_and_grad_sample(x, y).dict(),
+                    ))
+                    progress.update(b_size)
+                progress.set_description(f"Loss/gradient sampling (batchsize={b_size})") 
         return budget
-
-    def _sample_batchloss(self, b_size, count, append_to, progress: tqdm | None = None):
-        data_loader = self.loader(b_size)
-        data_iter = iter(data_loader)
-        for _ in range(count):
-            try:
-                x, y = next(data_iter)
-            except StopIteration:
-                # need to reinitialized loader
-                data_iter = iter(data_loader)
-                x, y = next(data_iter)
-            loss, g_norm = self.loss_sample(x, y)
-            append_to.append(
-                {
-                    "loss": loss,
-                    "grad_norm": g_norm,
-                    "batchsize": b_size,
-                    "time": time.time(),
-                }
-            )
-            if progress:
-                progress.update(b_size)
-                progress.set_description(f"Loss/gradient sampling (batchsize={b_size})")
-        return append_to
